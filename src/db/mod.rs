@@ -51,10 +51,31 @@ pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
         )?;
 
         // V2: TUS resumable upload columns
-        conn.execute_batch(include_str!("../../migrations/V2__tus_and_cache.sql"))
-            .map_err(|e| tracing::warn!("V2 migration (may already be applied): {e}"))
-            .ok();
+        let v2_already_applied = {
+            let mut stmt = conn.prepare("PRAGMA table_info(uploads)")?;
+            let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
 
+            let mut has_upload_length = false;
+            let mut has_upload_offset = false;
+            let mut has_upload_metadata = false;
+
+            for column in columns {
+                match column?.as_str() {
+                    "upload_length" => has_upload_length = true,
+                    "upload_offset" => has_upload_offset = true,
+                    "upload_metadata" => has_upload_metadata = true,
+                    _ => {}
+                }
+            }
+
+            has_upload_length && has_upload_offset && has_upload_metadata
+        };
+
+        if v2_already_applied {
+            tracing::info!("V2 migration already applied; skipping");
+        } else {
+            conn.execute_batch(include_str!("../../migrations/V2__tus_and_cache.sql"))?;
+        }
         Ok::<_, rusqlite::Error>(())
     })
     .await
