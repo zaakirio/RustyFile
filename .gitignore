@@ -4,7 +4,7 @@
 ARCHITECTURE_*.md
 SPEC.md
 /docs/superpowers/
-
+/docs/*.md
 # Runtime data
 /data/
 /rustyfile-data/
