@@ -7,9 +7,9 @@ use axum::routing::{delete, head, options, patch, post};
 use axum::Router;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use http_body_util::BodyExt;
 use rusqlite::params;
 use std::io::Write;
-use tokio_util::io::StreamReader;
 
 use crate::api::middleware::auth::require_auth;
 use crate::error::AppError;
@@ -65,16 +65,6 @@ fn temp_path(cache_dir: &str, upload_id: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(cache_dir)
         .join("uploads")
         .join(upload_id)
-}
-
-/// Common TUS response headers.
-fn tus_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::HeaderName::from_static("tus-resumable"),
-        HeaderValue::from_static(TUS_RESUMABLE),
-    );
-    headers
 }
 
 // ---------------------------------------------------------------------------
@@ -312,26 +302,21 @@ async fn append_chunk(
         return Err(AppError::UploadConflict);
     }
 
-    // Stream body to temp file.
+    // Collect body bytes.
+    let body_bytes = body
+        .collect()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to read request body: {e}")))?
+        .to_bytes();
+
+    let chunk_len = body_bytes.len() as i64;
+
+    // Append to temp file with fsync on a blocking thread.
     let cache_dir = state.config.cache_dir.clone();
     let tmp = temp_path(&cache_dir, &upload_id);
-
-    // Read body into bytes, then append using spawn_blocking for fsync.
-    use futures_util::TryStreamExt;
-    let stream = body.into_data_stream();
-    let byte_stream = stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
-    let mut reader = StreamReader::new(byte_stream);
-
-    // Read all chunks into a buffer.
-    let mut buf = Vec::new();
-    tokio::io::copy(&mut reader, &mut buf)
-        .await
-        .map_err(AppError::Io)?;
-
-    let chunk_len = buf.len() as i64;
     let tmp_clone = tmp.clone();
+    let buf = body_bytes.to_vec();
 
-    // Append to file with fsync on a blocking thread.
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         let mut file = std::fs::OpenOptions::new()
             .append(true)

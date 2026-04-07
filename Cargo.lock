@@ -2096,6 +2096,7 @@ dependencies = [
  "fast_image_resize",
  "figment",
  "futures-util",
+ "http-body-util",
  "image",
  "jsonwebtoken",
  "mime_guess",
