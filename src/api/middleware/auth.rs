@@ -8,8 +8,6 @@ use crate::db::user_repo;
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// Middleware that requires a valid JWT and injects `Claims` and `User` into
-/// request extensions for downstream handlers.
 pub async fn require_auth(
     State(state): State<AppState>,
     mut request: Request<axum::body::Body>,

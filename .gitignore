@@ -23,6 +23,7 @@ config.toml
 
 # Node
 node_modules/
+frontend/dist/
 
 # Environment
 .env

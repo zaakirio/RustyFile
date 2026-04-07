@@ -11,10 +11,6 @@ use crate::error::AppError;
 use crate::services::file_ops;
 use crate::state::AppState;
 
-// ---------------------------------------------------------------------------
-// Query / body types
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Deserialize)]
 pub struct BrowseQuery {
     pub content: Option<bool>,
@@ -31,14 +27,9 @@ pub struct CreateBody {
 #[derive(Debug, Deserialize)]
 pub struct RenameBody {
     pub destination: String,
-    /// Allow overwriting an existing destination (default: false).
     #[serde(default)]
     pub overwrite: bool,
 }
-
-// ---------------------------------------------------------------------------
-// Response types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
 struct FileInfoResponse {
@@ -55,11 +46,6 @@ struct MutationResponse {
     message: String,
 }
 
-// ---------------------------------------------------------------------------
-// Handlers
-// ---------------------------------------------------------------------------
-
-/// GET / or GET /*path -- Browse a directory or inspect a file.
 async fn browse(
     State(state): State<AppState>,
     path: Option<Path<String>>,
@@ -80,12 +66,10 @@ async fn browse(
             state.config.max_listing_items,
         ).await?;
 
-        // Sort items: directories first, then by the requested field.
         let sort_field = query.sort.as_deref().unwrap_or("name");
         let ascending = query.order.as_deref().unwrap_or("asc") != "desc";
 
         listing.items.sort_by(|a, b| {
-            // Directories always come first.
             match (a.is_dir, b.is_dir) {
                 (true, false) => return std::cmp::Ordering::Less,
                 (false, true) => return std::cmp::Ordering::Greater,
@@ -100,7 +84,6 @@ async fn browse(
                     let ext_b = b.extension.as_deref().unwrap_or("");
                     ext_a.to_lowercase().cmp(&ext_b.to_lowercase())
                 }
-                // Default: sort by name, case-insensitive.
                 _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             };
 
@@ -109,11 +92,9 @@ async fn browse(
 
         Ok(Json(serde_json::to_value(&listing).map_err(AppError::Json)?))
     } else {
-        // Single file info.
         let entry = file_ops::file_info(&state.canonical_root, &resolved).await?;
 
         let content = if query.content.unwrap_or(false) {
-            // Only try text content for text-like MIME types.
             let is_text = entry
                 .mime_type
                 .as_deref()
@@ -136,7 +117,6 @@ async fn browse(
             None
         };
 
-        // Detect subtitles for video files (non-blocking).
         let subtitles = if entry
             .mime_type
             .as_deref()
@@ -159,7 +139,6 @@ async fn browse(
     }
 }
 
-/// PUT /*path -- Save file content (body = raw bytes).
 async fn save_file(
     State(state): State<AppState>,
     Path(user_path): Path<String>,
@@ -178,7 +157,6 @@ async fn save_file(
     ))
 }
 
-/// POST /*path -- Create a directory.
 async fn create(
     State(state): State<AppState>,
     Path(user_path): Path<String>,
@@ -203,7 +181,6 @@ async fn create(
     ))
 }
 
-/// DELETE /*path -- Delete a file or directory.
 async fn remove(
     State(state): State<AppState>,
     Path(user_path): Path<String>,
@@ -218,7 +195,6 @@ async fn remove(
     }))
 }
 
-/// PATCH /*path -- Rename / move a file or directory.
 async fn rename_item(
     State(state): State<AppState>,
     Path(user_path): Path<String>,
@@ -235,10 +211,6 @@ async fn rename_item(
     }))
 }
 
-// ---------------------------------------------------------------------------
-// Router
-// ---------------------------------------------------------------------------
-
 pub fn routes(state: AppState) -> Router<AppState> {
     let max_upload = state.config.max_upload_bytes;
 
@@ -253,6 +225,5 @@ pub fn routes(state: AppState) -> Router<AppState> {
                 .patch(rename_item),
         )
         .route_layer(middleware::from_fn_with_state(state, require_auth))
-        // Configurable upload body limit (default 50 MB).
         .layer(DefaultBodyLimit::max(max_upload))
 }

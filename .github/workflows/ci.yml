@@ -10,6 +10,8 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Create frontend dist stub
+        run: mkdir -p frontend/dist && echo '<!DOCTYPE html><html><body></body></html>' > frontend/dist/index.html
       - name: Format check
         run: cargo fmt --check
       - name: Clippy

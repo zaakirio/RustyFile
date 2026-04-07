@@ -7,7 +7,6 @@ use serde::Serialize;
 use crate::db;
 use crate::error::AppError;
 
-/// Represents a user record from the database.
 #[derive(Debug, Clone, Serialize)]
 pub struct User {
     pub id: i64,
@@ -19,7 +18,6 @@ pub struct User {
     pub updated_at: String,
 }
 
-/// Shared helper: map a rusqlite row to a User struct.
 fn row_to_user(row: &rusqlite::Row) -> rusqlite::Result<User> {
     Ok(User {
         id: row.get(0)?,
@@ -31,7 +29,6 @@ fn row_to_user(row: &rusqlite::Row) -> rusqlite::Result<User> {
     })
 }
 
-/// Check whether at least one admin user exists in the database.
 pub async fn admin_exists(pool: &Pool) -> Result<bool, AppError> {
     db::interact(pool, |conn| {
         let count: i64 = conn.query_row(
@@ -44,7 +41,6 @@ pub async fn admin_exists(pool: &Pool) -> Result<bool, AppError> {
     .await
 }
 
-/// Hash a plaintext password using Argon2id with a random salt.
 pub fn hash_password(password: &str) -> Result<String, AppError> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
@@ -54,7 +50,6 @@ pub fn hash_password(password: &str) -> Result<String, AppError> {
     Ok(hash.to_string())
 }
 
-/// Insert a new user into the database and return the full user record.
 pub async fn create_user(
     pool: &Pool,
     username: &str,
@@ -83,7 +78,6 @@ pub async fn create_user(
     .await
 }
 
-/// Find a user by username. Returns `None` if no matching user exists.
 pub async fn find_by_username(pool: &Pool, username: &str) -> Result<Option<User>, AppError> {
     let username = username.to_string();
 
@@ -104,7 +98,6 @@ pub async fn find_by_username(pool: &Pool, username: &str) -> Result<Option<User
     .await
 }
 
-/// Find a user by their ID. Returns `None` if no matching user exists.
 pub async fn find_by_id(pool: &Pool, user_id: i64) -> Result<Option<User>, AppError> {
     db::interact(pool, move |conn| {
         let result = conn.query_row(
