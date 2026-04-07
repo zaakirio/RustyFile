@@ -2,7 +2,7 @@
 
 A fast, lightweight, self-hosted file browser built in Rust.
 
-[![CI](https://github.com/yourorg/rustyfile/actions/workflows/ci.yml/badge.svg)](https://github.com/yourorg/rustyfile/actions/workflows/ci.yml)
+[![CI](https://github.com/zaakirio/RustyFile/actions/workflows/ci.yml/badge.svg)](https://github.com/zaakirio/RustyFile/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Why RustyFile?
@@ -33,7 +33,7 @@ Existing file browsers (FileBrowser, Filestash) are built in Go. RustyFile bring
 
 ```bash
 # Download (replace with actual release URL)
-curl -fsSL https://github.com/yourorg/rustyfile/releases/latest/download/rustyfile-linux-amd64.tar.gz | tar xz
+curl -fsSL https://github.com/zaakirio/RustyFile/releases/latest/download/rustyfile-linux-amd64.tar.gz | tar xz
 
 # Run -- serves files from ./my-files, stores DB in ./data
 ./rustyfile --root ./my-files --data-dir ./data --port 8080
@@ -71,7 +71,7 @@ volumes:
 ### From Source
 
 ```bash
-git clone https://github.com/yourorg/rustyfile.git
+git clone https://github.com/zaakirio/RustyFile.git
 cd rustyfile
 cargo build --release
 ./target/release/rustyfile --root ./test-data --port 8080
