@@ -56,6 +56,46 @@ async fn main() -> anyhow::Result<()> {
     // 7b. Create directory listing cache (1000 entries, 30s TTL)
     let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
 
+    // Spawn filesystem watcher for cache invalidation
+    {
+        use notify::RecursiveMode;
+        use notify_debouncer_full::new_debouncer;
+
+        let dir_cache_watcher = dir_cache.clone();
+        let watch_root = canonical_root.clone();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+
+        let mut debouncer = new_debouncer(
+            std::time::Duration::from_millis(500),
+            None,
+            move |result: notify_debouncer_full::DebounceEventResult| {
+                let _ = tx.blocking_send(result);
+            },
+        )
+        .expect("Failed to create filesystem watcher");
+
+        debouncer
+            .watch(&watch_root, RecursiveMode::Recursive)
+            .expect("Failed to watch root directory");
+
+        tokio::spawn(async move {
+            let _debouncer = debouncer; // Keep alive
+            while let Some(Ok(events)) = rx.recv().await {
+                for event in events {
+                    for path in &event.paths {
+                        if let Some(parent) = path.parent() {
+                            let key = parent.to_string_lossy().to_string();
+                            dir_cache_watcher.invalidate(&key).await;
+                        }
+                    }
+                }
+            }
+        });
+
+        tracing::info!("Filesystem watcher active for cache invalidation");
+    }
+
     // 7c. Create thumbnail worker with disk cache
     let thumb_cache_dir = std::path::PathBuf::from(&config.data_dir)
         .join("cache")
