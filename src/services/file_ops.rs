@@ -147,6 +147,9 @@ pub async fn list_directory(
         });
     }
 
+    // num_dirs/num_files reflect only the returned (visible) entries.
+    // When truncated, the total entry count is in `total` but the
+    // dir/file breakdown of unreturned entries is unknown.
     let num_dirs = items.iter().filter(|e| e.is_dir).count();
     let num_files = items.iter().filter(|e| !e.is_dir).count();
     let truncated = total_count > max_items;
@@ -318,6 +321,12 @@ pub async fn delete(canonical_root: &Path, file_path: &Path) -> Result<(), AppEr
     }
 }
 
+/// Rename (move) a file or directory.
+///
+/// **Note:** The `overwrite=false` check has an inherent TOCTOU race on POSIX:
+/// between `to.exists()` returning false and `fs::rename()` executing, another
+/// process could create a file at `to`. This is a known limitation of path-based
+/// file operations. Use `overwrite=true` when atomic replacement is needed.
 pub async fn rename(from: &Path, to: &Path, overwrite: bool) -> Result<(), AppError> {
     if let Some(parent) = to.parent() {
         tokio::fs::create_dir_all(parent)

@@ -75,7 +75,13 @@ fn content_disposition(filename: &str, inline: bool) -> String {
 
     let ascii_name: String = filename
         .chars()
-        .map(|c| if c.is_ascii() && c != '"' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii() && !matches!(c, '"' | ';' | '\\' | ',') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     let encoded: String = filename
