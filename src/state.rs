@@ -1,12 +1,31 @@
+use std::num::NonZeroU32;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use dashmap::DashMap;
 use deadpool_sqlite::Pool;
+use governor::clock::DefaultClock;
+use governor::state::keyed::DashMapStateStore;
+use governor::{Quota, RateLimiter};
 
 use crate::config::AppConfig;
+
+pub type LoginRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
+
+/// Create a keyed rate limiter that allows `max_attempts` within `window_secs`.
+pub fn new_login_limiter(max_attempts: u32, window_secs: u64) -> Arc<LoginRateLimiter> {
+    // Use milliseconds to avoid integer division truncating to zero when
+    // window_secs < max_attempts (e.g. 60s / 100 attempts = 0s).
+    let period_ms = (window_secs * 1000) / max_attempts as u64;
+    let period = Duration::from_millis(period_ms.max(1));
+
+    let quota = Quota::with_period(period)
+        .expect("Non-zero rate-limit period")
+        .allow_burst(NonZeroU32::new(max_attempts).expect("Non-zero max_attempts"));
+
+    Arc::new(RateLimiter::dashmap(quota))
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -16,52 +35,8 @@ pub struct AppState {
     pub jwt_secret: Vec<u8>,
     pub canonical_root: PathBuf,
     pub login_limiter: Arc<LoginRateLimiter>,
-}
-
-pub struct LoginRateLimiter {
-    attempts: DashMap<String, (AtomicU32, Instant)>,
-    max_attempts: u32,
-    window: Duration,
-}
-
-impl LoginRateLimiter {
-    pub fn new(max_attempts: u32, window: Duration) -> Self {
-        Self {
-            attempts: DashMap::new(),
-            max_attempts,
-            window,
-        }
-    }
-
-    pub fn check_rate_limit(&self, ip: &str) -> bool {
-        let now = Instant::now();
-
-        // Evict stale entries only when map grows large.
-        if self.attempts.len() > 10_000 {
-            self.attempts.retain(|_, v| now.duration_since(v.1) < self.window);
-        }
-
-        let entry = self.attempts.entry(ip.to_string()).or_insert_with(|| {
-            (AtomicU32::new(0), now)
-        });
-
-        let (count, window_start) = entry.value();
-
-        if now.duration_since(*window_start) >= self.window {
-            count.store(1, Ordering::Relaxed);
-            // Can't mutate window_start through DashMap shared ref; re-insert instead.
-            drop(entry);
-            self.attempts.insert(ip.to_string(), (AtomicU32::new(1), now));
-            return true;
-        }
-
-        let current = count.fetch_add(1, Ordering::Relaxed) + 1;
-        current <= self.max_attempts
-    }
-
-    pub fn reset(&self, ip: &str) {
-        self.attempts.remove(ip);
-    }
+    /// Pre-hashed dummy password for timing-attack-safe login failures.
+    pub dummy_hash: String,
 }
 
 /// Time-limited window for initial admin creation. Closes on admin creation

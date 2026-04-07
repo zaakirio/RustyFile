@@ -188,7 +188,7 @@ async fn remove(
 ) -> Result<Json<MutationResponse>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
-    file_ops::delete(&resolved).await?;
+    file_ops::delete(&state.canonical_root, &resolved).await?;
 
     Ok(Json(MutationResponse {
         message: format!("Deleted: {user_path}"),

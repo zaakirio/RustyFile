@@ -1,5 +1,4 @@
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use argon2::password_hash::SaltString;
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
@@ -16,8 +15,8 @@ use crate::state::AppState;
 pub struct Claims {
     pub sub: i64,
     pub role: String,
-    pub exp: usize,
-    pub iat: usize,
+    pub exp: u64,
+    pub iat: u64,
 }
 
 pub fn create_token(
@@ -26,8 +25,8 @@ pub fn create_token(
     secret: &[u8],
     expiry_hours: u64,
 ) -> Result<String, AppError> {
-    let now = chrono::Utc::now().timestamp() as usize;
-    let exp = now + (expiry_hours as usize) * 3600;
+    let now = chrono::Utc::now().timestamp() as u64;
+    let exp = now + expiry_hours * 3600;
 
     let claims = Claims {
         sub: user_id,
@@ -117,10 +116,10 @@ async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
-) -> Result<(StatusCode, Json<AuthResponse>), AppError> {
+) -> Result<impl axum::response::IntoResponse, AppError> {
     let client_ip = extract_client_ip(&headers);
 
-    if !state.login_limiter.check_rate_limit(&client_ip) {
+    if state.login_limiter.check_key(&client_ip).is_err() {
         tracing::warn!(client_ip = %client_ip, "Login rate limit exceeded");
         return Err(AppError::TooManyRequests(
             "Too many login attempts. Please try again later.".into(),
@@ -141,8 +140,6 @@ async fn login(
                 return Err(AppError::Unauthorized("Invalid username or password".into()));
             }
 
-            state.login_limiter.reset(&client_ip);
-
             let token = create_token(
                 user.id,
                 &user.role,
@@ -150,23 +147,36 @@ async fn login(
                 state.config.jwt_expiry_hours,
             )?;
 
-            Ok((StatusCode::OK, Json(AuthResponse { token, user })))
+            let cookie = format!(
+                "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+                token,
+                state.config.jwt_expiry_hours * 3600
+            );
+
+            Ok((
+                StatusCode::OK,
+                [(axum::http::header::SET_COOKIE, cookie)],
+                Json(AuthResponse { token: token.clone(), user }),
+            ))
         }
         None => {
-            // Dummy hash to prevent timing-based username enumeration.
-            let dummy_salt = SaltString::from_b64("dW5rbm93bnVzZXJzYWx0").unwrap();
+            // Constant-time failure: verify against pre-hashed dummy.
+            let parsed = PasswordHash::new(&state.dummy_hash)
+                .expect("Dummy hash is valid PHC");
             let _ = Argon2::default()
-                .hash_password(body.password.as_bytes(), &dummy_salt);
+                .verify_password(body.password.as_bytes(), &parsed);
 
             Err(AppError::Unauthorized("Invalid username or password".into()))
         }
     }
 }
 
-async fn logout() -> Json<LogoutResponse> {
-    Json(LogoutResponse {
-        message: "Logged out".into(),
-    })
+async fn logout() -> impl axum::response::IntoResponse {
+    let clear_cookie = "rustyfile_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0";
+    (
+        [(axum::http::header::SET_COOKIE, clear_cookie.to_string())],
+        Json(LogoutResponse { message: "Logged out".into() }),
+    )
 }
 
 /// Re-verifies user existence to prevent deleted users from refreshing tokens.

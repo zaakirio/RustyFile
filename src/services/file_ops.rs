@@ -257,9 +257,18 @@ pub async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), AppError
     );
     let tmp_path = parent.join(tmp_name);
 
-    tokio::fs::write(&tmp_path, content)
-        .await
-        .map_err(AppError::Io)?;
+    {
+        use tokio::io::AsyncWriteExt;
+
+        let mut opts = tokio::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+
+        let mut file = opts.open(&tmp_path).await.map_err(AppError::Io)?;
+        file.write_all(content).await.map_err(AppError::Io)?;
+        file.sync_data().await.map_err(AppError::Io)?;
+    }
 
     tokio::fs::rename(&tmp_path, file_path)
         .await
@@ -275,12 +284,25 @@ pub async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), AppError
 }
 
 pub async fn create_directory(dir_path: &Path) -> Result<(), AppError> {
-    tokio::fs::create_dir_all(dir_path)
+    // Only create a single directory level; parent must exist.
+    tokio::fs::create_dir(dir_path)
         .await
-        .map_err(AppError::Io)
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                AppError::NotFound("Parent directory does not exist".into())
+            }
+            std::io::ErrorKind::AlreadyExists => {
+                AppError::Conflict("Directory already exists".into())
+            }
+            _ => AppError::Io(e),
+        })
 }
 
-pub async fn delete(file_path: &Path) -> Result<(), AppError> {
+pub async fn delete(canonical_root: &Path, file_path: &Path) -> Result<(), AppError> {
+    if file_path == canonical_root {
+        return Err(AppError::Forbidden("Cannot delete the root directory".into()));
+    }
+
     let metadata = tokio::fs::metadata(file_path)
         .await
         .map_err(|_| AppError::NotFound("Path not found".into()))?;

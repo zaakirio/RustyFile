@@ -36,7 +36,7 @@ async fn setup_status(State(state): State<AppState>) -> Json<SetupStatusResponse
 async fn create_admin(
     State(state): State<AppState>,
     Json(body): Json<CreateAdminRequest>,
-) -> Result<(StatusCode, Json<CreateAdminResponse>), AppError> {
+) -> Result<impl axum::response::IntoResponse, AppError> {
     if !state.setup_guard.is_setup_allowed() {
         if !state.setup_guard.is_setup_required() {
             return Err(AppError::Conflict("Admin account already exists".into()));
@@ -106,9 +106,16 @@ async fn create_admin(
         state.config.jwt_expiry_hours,
     )?;
 
+    let cookie = format!(
+        "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        token,
+        state.config.jwt_expiry_hours * 3600
+    );
+
     Ok((
         StatusCode::CREATED,
-        Json(CreateAdminResponse { token, user }),
+        [(axum::http::header::SET_COOKIE, cookie)],
+        Json(CreateAdminResponse { token: token.clone(), user }),
     ))
 }
 
