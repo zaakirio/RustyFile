@@ -1,4 +1,6 @@
-use axum::http::{header, StatusCode, Uri};
+#[cfg(feature = "embed-frontend")]
+use axum::http::header;
+use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 
 #[cfg(feature = "embed-frontend")]

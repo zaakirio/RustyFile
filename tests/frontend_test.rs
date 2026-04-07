@@ -1,3 +1,5 @@
+#![cfg(feature = "embed-frontend")]
+
 mod helpers;
 
 use helpers::TestApp;
