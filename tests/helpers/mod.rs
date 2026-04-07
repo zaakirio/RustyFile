@@ -48,11 +48,16 @@ impl TestApp {
             .await
             .expect("Failed to get JWT secret");
 
+        let canonical_root = std::path::PathBuf::from(&config.root)
+            .canonicalize()
+            .expect("Root temp dir must be canonicalizable");
+
         let state = AppState {
             db: pool,
             config,
             setup_guard,
             jwt_secret,
+            canonical_root,
         };
 
         let app = build_router(state);

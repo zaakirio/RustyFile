@@ -37,7 +37,9 @@ pub struct DirListing {
 /// Strips `..`, `.`, and absolute prefixes -- only `Component::Normal` segments
 /// are kept. The resolved path is canonicalized and verified to remain under the
 /// canonical root to prevent directory-traversal attacks.
-pub fn safe_resolve(root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
+///
+/// `canonical_root` must already be canonicalized (computed once at startup).
+pub fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
     // Build a clean relative path from only Normal components.
     let mut relative = PathBuf::new();
     for component in Path::new(user_path).components() {
@@ -48,12 +50,7 @@ pub fn safe_resolve(root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
         // silently dropped to prevent directory-traversal attacks.
     }
 
-    let target = root.join(&relative);
-
-    // Canonicalize the root (it must exist).
-    let canonical_root = root
-        .canonicalize()
-        .map_err(|_| AppError::NotFound("Root directory not found".into()))?;
+    let target = canonical_root.join(&relative);
 
     // If the full target exists, canonicalize it directly.
     // Otherwise, walk up to the nearest existing ancestor, canonicalize that,
@@ -79,7 +76,7 @@ pub fn safe_resolve(root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
         resolved
     };
 
-    if !canonical_target.starts_with(&canonical_root) {
+    if !canonical_target.starts_with(canonical_root) {
         return Err(AppError::Forbidden("Path escapes root directory".into()));
     }
 
@@ -91,9 +88,10 @@ pub fn safe_resolve(root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
 // ---------------------------------------------------------------------------
 
 /// List the contents of a directory, returning metadata for every entry.
-pub async fn list_directory(root: &Path, dir_path: &Path) -> Result<DirListing, AppError> {
-    let canonical_root = root.canonicalize().map_err(AppError::Io)?;
-
+pub async fn list_directory(
+    canonical_root: &Path,
+    dir_path: &Path,
+) -> Result<DirListing, AppError> {
     let mut entries = tokio::fs::read_dir(dir_path)
         .await
         .map_err(|e| AppError::NotFound(format!("Cannot read directory: {e}")))?;
@@ -106,7 +104,7 @@ pub async fn list_directory(root: &Path, dir_path: &Path) -> Result<DirListing, 
 
         // Compute path relative to root.
         let rel_path = entry_path
-            .strip_prefix(&canonical_root)
+            .strip_prefix(canonical_root)
             .unwrap_or(&entry_path)
             .to_string_lossy()
             .to_string();
@@ -156,7 +154,7 @@ pub async fn list_directory(root: &Path, dir_path: &Path) -> Result<DirListing, 
 
     // Compute the listing path relative to root.
     let listing_path = dir_path
-        .strip_prefix(&canonical_root)
+        .strip_prefix(canonical_root)
         .unwrap_or(Path::new(""))
         .to_string_lossy()
         .to_string();
@@ -174,9 +172,7 @@ pub async fn list_directory(root: &Path, dir_path: &Path) -> Result<DirListing, 
 // ---------------------------------------------------------------------------
 
 /// Return metadata for a single file or directory.
-pub async fn file_info(root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
-    let canonical_root = root.canonicalize().map_err(AppError::Io)?;
-
+pub async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
     let metadata = tokio::fs::metadata(file_path)
         .await
         .map_err(|_| AppError::NotFound(format!("File not found: {}", file_path.display())))?;
@@ -195,7 +191,7 @@ pub async fn file_info(root: &Path, file_path: &Path) -> Result<FileEntry, AppEr
         .unwrap_or_default();
 
     let rel_path = file_path
-        .strip_prefix(&canonical_root)
+        .strip_prefix(canonical_root)
         .unwrap_or(file_path)
         .to_string_lossy()
         .to_string();
@@ -309,31 +305,34 @@ pub async fn delete(file_path: &Path) -> Result<(), AppError> {
 }
 
 /// Rename (move) a file or directory. Ensures the destination's parent exists.
+/// Fix 15: Removed TOCTOU pre-check; maps IO error directly.
 pub async fn rename(from: &Path, to: &Path) -> Result<(), AppError> {
-    if !from.exists() {
-        return Err(AppError::NotFound(format!(
-            "Source path not found: {}",
-            from.display()
-        )));
-    }
-
     if let Some(parent) = to.parent() {
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(AppError::Io)?;
     }
 
-    tokio::fs::rename(from, to).await.map_err(AppError::Io)
+    tokio::fs::rename(from, to).await.map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => AppError::NotFound("Source not found".into()),
+        _ => AppError::Io(e),
+    })
 }
 
 // ---------------------------------------------------------------------------
 // Subtitle detection
 // ---------------------------------------------------------------------------
 
+/// Non-blocking subtitle detection: spawns blocking I/O on a worker thread.
+pub async fn detect_subtitles(video_path: PathBuf) -> Vec<String> {
+    tokio::task::spawn_blocking(move || detect_subtitles_sync(&video_path))
+        .await
+        .unwrap_or_default()
+}
+
 /// Look for subtitle files (.vtt, .srt, .ass, .ssa) with the same base name as
-/// the given video file in the same directory. Uses synchronous I/O since we
-/// are scanning a single directory.
-pub fn detect_subtitles(video_path: &Path) -> Vec<String> {
+/// the given video file in the same directory.
+fn detect_subtitles_sync(video_path: &Path) -> Vec<String> {
     let parent = match video_path.parent() {
         Some(p) => p,
         None => return Vec::new(),

@@ -17,6 +17,24 @@ pub fn create_pool(config: &AppConfig) -> anyhow::Result<Pool> {
     Ok(pool)
 }
 
+/// DRY helper: acquire a connection from the pool and run a closure on it.
+///
+/// Handles pool errors, interact errors, and rusqlite errors uniformly.
+pub async fn interact<F, T>(pool: &Pool, f: F) -> Result<T, AppError>
+where
+    F: FnOnce(&mut rusqlite::Connection) -> Result<T, rusqlite::Error> + Send + 'static,
+    T: Send + 'static,
+{
+    let conn = pool
+        .get()
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    conn.interact(f)
+        .await
+        .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
+        .map_err(AppError::Database)
+}
+
 /// Run database migrations: set PRAGMAs and execute the initial schema.
 pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
     let conn = pool.get().await?;
@@ -34,6 +52,12 @@ pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
         let migration_sql = include_str!("../../migrations/V1__initial_schema.sql");
         conn.execute_batch(migration_sql)?;
 
+        // Fix 16: Schema version groundwork for future multi-version migrations
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('schema_version', X'01')",
+            [],
+        )?;
+
         Ok::<_, rusqlite::Error>(())
     })
     .await
@@ -49,38 +73,31 @@ pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
 /// If a secret already exists, it is returned. Otherwise, 64 random bytes
 /// are generated, stored, and returned.
 pub async fn get_or_create_jwt_secret(pool: &Pool) -> Result<Vec<u8>, AppError> {
-    let conn = pool.get().await.map_err(|e| AppError::Internal(e.to_string()))?;
+    interact(pool, |conn| {
+        // Try to fetch existing secret
+        let existing: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params!["jwt_secret"],
+                |row| row.get(0),
+            )
+            .ok();
 
-    let secret = conn
-        .interact(|conn| {
-            // Try to fetch existing secret
-            let existing: Option<Vec<u8>> = conn
-                .query_row(
-                    "SELECT value FROM settings WHERE key = ?1",
-                    params!["jwt_secret"],
-                    |row| row.get(0),
-                )
-                .ok();
+        if let Some(secret) = existing {
+            return Ok(secret);
+        }
 
-            if let Some(secret) = existing {
-                return Ok(secret);
-            }
+        // Generate new 64-byte secret
+        let mut rng = rand::thread_rng();
+        let secret: Vec<u8> = (0..64).map(|_| rng.gen()).collect();
 
-            // Generate new 64-byte secret
-            let mut rng = rand::thread_rng();
-            let secret: Vec<u8> = (0..64).map(|_| rng.gen()).collect();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)",
+            params!["jwt_secret", &secret],
+        )?;
 
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?1, ?2)",
-                params!["jwt_secret", &secret],
-            )?;
-
-            tracing::info!("Generated new JWT signing secret");
-            Ok::<Vec<u8>, rusqlite::Error>(secret)
-        })
-        .await
-        .map_err(|e| AppError::Internal(format!("JWT secret interact error: {e}")))?
-        .map_err(AppError::Database)?;
-
-    Ok(secret)
+        tracing::info!("Generated new JWT signing secret");
+        Ok(secret)
+    })
+    .await
 }

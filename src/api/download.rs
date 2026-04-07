@@ -1,10 +1,9 @@
-use std::path::PathBuf;
-
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::{header, HeaderMap, Response, StatusCode};
 use axum::middleware;
 use axum::routing::get;
 use axum::{body::Body, Router};
+use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
@@ -13,6 +12,16 @@ use crate::db::user_repo;
 use crate::error::AppError;
 use crate::services::file_ops;
 use crate::state::AppState;
+
+// ---------------------------------------------------------------------------
+// Query parameters
+// ---------------------------------------------------------------------------
+
+/// Fix 14: Allow `?inline=true` to display in-browser instead of downloading.
+#[derive(Debug, Deserialize)]
+struct DownloadQuery {
+    inline: Option<bool>,
+}
 
 // ---------------------------------------------------------------------------
 // Range parsing
@@ -81,9 +90,12 @@ fn parse_range(header: &str, file_size: u64) -> Option<ByteRange> {
 // Content-Disposition helper
 // ---------------------------------------------------------------------------
 
-/// Build a Content-Disposition header value for inline display with both ASCII
-/// and UTF-8 filename parameters (RFC 5987).
-fn content_disposition(filename: &str) -> String {
+/// Build a Content-Disposition header value with both ASCII and UTF-8 filename
+/// parameters (RFC 5987). The `inline` parameter controls whether the browser
+/// should display the content in-page or prompt a download.
+fn content_disposition(filename: &str, inline: bool) -> String {
+    let disposition_type = if inline { "inline" } else { "attachment" };
+
     // Build an ASCII-safe version by replacing non-ASCII bytes with underscores.
     let ascii_name: String = filename
         .chars()
@@ -102,7 +114,7 @@ fn content_disposition(filename: &str) -> String {
         })
         .collect();
 
-    format!("inline; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}")
+    format!("{disposition_type}; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}")
 }
 
 // ---------------------------------------------------------------------------
@@ -113,11 +125,11 @@ fn content_disposition(filename: &str) -> String {
 async fn download(
     State(state): State<AppState>,
     Path(user_path): Path<String>,
+    Query(query): Query<DownloadQuery>,
     headers: HeaderMap,
     Extension(_user): Extension<user_repo::User>,
 ) -> Result<Response<Body>, AppError> {
-    let root = PathBuf::from(&state.config.root);
-    let resolved = file_ops::safe_resolve(&root, &user_path)?;
+    let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
     // Ensure target is a file.
     let metadata = tokio::fs::metadata(&resolved)
@@ -136,6 +148,37 @@ async fn download(
         .into();
     let last_modified = modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
+    // Fix 5: Generate ETag from file size + last modified timestamp.
+    let etag = format!("\"{:x}-{:x}\"", file_size, modified.timestamp());
+
+    // Fix 5: Check If-None-Match -- return 304 if ETag matches.
+    if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok())
+    {
+        if if_none_match == etag || if_none_match == "*" {
+            return Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header(header::ETAG, &etag)
+                .body(Body::empty())
+                .map_err(|e| AppError::Internal(e.to_string()));
+        }
+    }
+
+    // Fix 5: Check If-Modified-Since -- return 304 if not newer.
+    if let Some(ims) = headers
+        .get(header::IF_MODIFIED_SINCE)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Ok(ims_time) = chrono::DateTime::parse_from_rfc2822(ims) {
+            if modified <= ims_time {
+                return Response::builder()
+                    .status(StatusCode::NOT_MODIFIED)
+                    .header(header::ETAG, &etag)
+                    .body(Body::empty())
+                    .map_err(|e| AppError::Internal(e.to_string()));
+            }
+        }
+    }
+
     // Determine MIME type.
     let mime = mime_guess::from_path(&resolved)
         .first_or_octet_stream()
@@ -146,7 +189,8 @@ async fn download(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "download".into());
 
-    let disposition = content_disposition(&filename);
+    let inline = query.inline.unwrap_or(false);
+    let disposition = content_disposition(&filename, inline);
 
     // Check for Range header.
     let range_header = headers
@@ -154,7 +198,10 @@ async fn download(
         .and_then(|v| v.to_str().ok());
 
     match range_header.and_then(|h| parse_range(h, file_size)) {
-        Some(range) => serve_partial(resolved, file_size, range, &mime, &disposition, &last_modified).await,
+        Some(range) => {
+            serve_partial(resolved, file_size, range, &mime, &disposition, &last_modified, &etag)
+                .await
+        }
         None if range_header.is_some() => {
             // Range header present but unparseable -- return 416.
             let body = Body::empty();
@@ -164,17 +211,18 @@ async fn download(
                 .body(body)
                 .map_err(|e| AppError::Internal(e.to_string()))
         }
-        None => serve_full(resolved, file_size, &mime, &disposition, &last_modified).await,
+        None => serve_full(resolved, file_size, &mime, &disposition, &last_modified, &etag).await,
     }
 }
 
 /// Serve the complete file (200 OK).
 async fn serve_full(
-    path: PathBuf,
+    path: std::path::PathBuf,
     file_size: u64,
     mime: &str,
     disposition: &str,
     last_modified: &str,
+    etag: &str,
 ) -> Result<Response<Body>, AppError> {
     let file = tokio::fs::File::open(&path).await.map_err(AppError::Io)?;
     let stream = ReaderStream::new(file);
@@ -188,18 +236,22 @@ async fn serve_full(
         .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CACHE_CONTROL, "private")
         .header(header::LAST_MODIFIED, last_modified)
+        .header(header::ETAG, etag)
+        .header("Content-Security-Policy", "script-src 'none';")
+        .header("X-Content-Type-Options", "nosniff")
         .body(body)
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 /// Serve a byte range of the file (206 Partial Content).
 async fn serve_partial(
-    path: PathBuf,
+    path: std::path::PathBuf,
     file_size: u64,
     range: ByteRange,
     mime: &str,
     disposition: &str,
     last_modified: &str,
+    etag: &str,
 ) -> Result<Response<Body>, AppError> {
     let mut file = tokio::fs::File::open(&path).await.map_err(AppError::Io)?;
 
@@ -226,6 +278,9 @@ async fn serve_partial(
         .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CACHE_CONTROL, "private")
         .header(header::LAST_MODIFIED, last_modified)
+        .header(header::ETAG, etag)
+        .header("Content-Security-Policy", "script-src 'none';")
+        .header("X-Content-Type-Options", "nosniff")
         .body(body)
         .map_err(|e| AppError::Internal(e.to_string()))
 }

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -13,6 +14,8 @@ pub struct AppState {
     pub config: AppConfig,
     pub setup_guard: Arc<SetupGuard>,
     pub jwt_secret: Vec<u8>,
+    /// Pre-canonicalized root path, computed once at startup.
+    pub canonical_root: PathBuf,
 }
 
 /// Guards the initial setup window.
@@ -36,17 +39,17 @@ impl SetupGuard {
 
     /// Returns true if no admin has been created yet.
     pub fn is_setup_required(&self) -> bool {
-        !self.admin_created.load(Ordering::SeqCst)
+        !self.admin_created.load(Ordering::Acquire)
     }
 
     /// Returns true if setup is still possible:
     /// no admin created AND the deadline has not passed.
     pub fn is_setup_allowed(&self) -> bool {
-        !self.admin_created.load(Ordering::SeqCst) && Instant::now() < self.deadline
+        !self.admin_created.load(Ordering::Acquire) && Instant::now() < self.deadline
     }
 
     /// Mark setup as complete (admin has been created).
     pub fn mark_complete(&self) {
-        self.admin_created.store(true, Ordering::SeqCst);
+        self.admin_created.store(true, Ordering::Release);
     }
 }

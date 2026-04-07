@@ -44,18 +44,25 @@ async fn main() -> anyhow::Result<()> {
     // 6. Get or create JWT signing secret
     let jwt_secret = db::get_or_create_jwt_secret(&pool).await?;
 
-    // 7. Build shared application state
+    // 7. Canonicalize root once at startup (avoids per-request syscall)
+    let canonical_root = std::path::PathBuf::from(&config.root)
+        .canonicalize()
+        .expect("Root directory must exist and be accessible");
+    tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
+
+    // 8. Build shared application state
     let state = AppState {
         db: pool,
         config: config.clone(),
         setup_guard,
         jwt_secret,
+        canonical_root,
     };
 
-    // 8. Build the router
+    // 9. Build the router
     let app = api::build_router(state);
 
-    // 9. Bind and serve with graceful shutdown
+    // 10. Bind and serve with graceful shutdown
     let addr = format!("{}:{}", config.host, config.port);
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("Listening on http://{addr}");

@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::routing::get;
@@ -66,15 +64,14 @@ async fn browse(
     Extension(_user): Extension<user_repo::User>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let user_path = path.map(|Path(p)| p).unwrap_or_default();
-    let root = PathBuf::from(&state.config.root);
-    let resolved = file_ops::safe_resolve(&root, &user_path)?;
+    let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
     let metadata = tokio::fs::metadata(&resolved)
         .await
         .map_err(|_| AppError::NotFound(format!("Path not found: {user_path}")))?;
 
     if metadata.is_dir() {
-        let mut listing = file_ops::list_directory(&root, &resolved).await?;
+        let mut listing = file_ops::list_directory(&state.canonical_root, &resolved).await?;
 
         // Sort items: directories first, then by the requested field.
         let sort_field = query.sort.as_deref().unwrap_or("name");
@@ -103,10 +100,10 @@ async fn browse(
             if ascending { ord } else { ord.reverse() }
         });
 
-        Ok(Json(serde_json::to_value(&listing).unwrap()))
+        Ok(Json(serde_json::to_value(&listing).map_err(AppError::Json)?))
     } else {
         // Single file info.
-        let entry = file_ops::file_info(&root, &resolved).await?;
+        let entry = file_ops::file_info(&state.canonical_root, &resolved).await?;
 
         let content = if query.content.unwrap_or(false) {
             // Only try text content for text-like MIME types.
@@ -132,13 +129,18 @@ async fn browse(
             None
         };
 
-        // Detect subtitles for video files.
-        let subtitles = entry
+        // Detect subtitles for video files (non-blocking).
+        let subtitles = if entry
             .mime_type
             .as_deref()
-            .filter(|m| m.starts_with("video/"))
-            .map(|_| file_ops::detect_subtitles(&resolved))
-            .filter(|s| !s.is_empty());
+            .map(|m| m.starts_with("video/"))
+            .unwrap_or(false)
+        {
+            let subs = file_ops::detect_subtitles(resolved.clone()).await;
+            if subs.is_empty() { None } else { Some(subs) }
+        } else {
+            None
+        };
 
         let response = FileInfoResponse {
             entry,
@@ -146,7 +148,7 @@ async fn browse(
             subtitles,
         };
 
-        Ok(Json(serde_json::to_value(&response).unwrap()))
+        Ok(Json(serde_json::to_value(&response).map_err(AppError::Json)?))
     }
 }
 
@@ -157,8 +159,7 @@ async fn save_file(
     Extension(_user): Extension<user_repo::User>,
     body: axum::body::Bytes,
 ) -> Result<(StatusCode, Json<MutationResponse>), AppError> {
-    let root = PathBuf::from(&state.config.root);
-    let resolved = file_ops::safe_resolve(&root, &user_path)?;
+    let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
     file_ops::write_file(&resolved, &body).await?;
 
@@ -183,8 +184,7 @@ async fn create(
         ));
     }
 
-    let root = PathBuf::from(&state.config.root);
-    let resolved = file_ops::safe_resolve(&root, &user_path)?;
+    let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
     file_ops::create_directory(&resolved).await?;
 
@@ -202,8 +202,7 @@ async fn remove(
     Path(user_path): Path<String>,
     Extension(_user): Extension<user_repo::User>,
 ) -> Result<Json<MutationResponse>, AppError> {
-    let root = PathBuf::from(&state.config.root);
-    let resolved = file_ops::safe_resolve(&root, &user_path)?;
+    let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
     file_ops::delete(&resolved).await?;
 
@@ -219,9 +218,8 @@ async fn rename_item(
     Extension(_user): Extension<user_repo::User>,
     Json(body): Json<RenameBody>,
 ) -> Result<Json<MutationResponse>, AppError> {
-    let root = PathBuf::from(&state.config.root);
-    let from = file_ops::safe_resolve(&root, &user_path)?;
-    let to = file_ops::safe_resolve(&root, &body.destination)?;
+    let from = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
+    let to = file_ops::safe_resolve(&state.canonical_root, &body.destination)?;
 
     file_ops::rename(&from, &to).await?;
 
@@ -246,4 +244,6 @@ pub fn routes(state: AppState) -> Router<AppState> {
                 .patch(rename_item),
         )
         .route_layer(middleware::from_fn_with_state(state, require_auth))
+        // Fix 10: Limit upload body to 5 MB for text editing
+        .layer(DefaultBodyLimit::max(5 * 1024 * 1024))
 }

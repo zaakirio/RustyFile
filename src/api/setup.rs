@@ -95,7 +95,18 @@ async fn create_admin(
 
     // ---- Create user ----
     let password_hash = user_repo::hash_password(&body.password)?;
-    let user = user_repo::create_user(&state.db, username, &password_hash, "admin").await?;
+    let user = match user_repo::create_user(&state.db, username, &password_hash, "admin").await {
+        Ok(user) => user,
+        Err(AppError::Database(ref e))
+            if e.to_string().contains("UNIQUE constraint failed") =>
+        {
+            state.setup_guard.mark_complete();
+            return Err(AppError::Conflict(
+                "Username already taken".into(),
+            ));
+        }
+        Err(e) => return Err(e),
+    };
 
     // Mark setup as complete so no further admin creation is allowed
     state.setup_guard.mark_complete();
