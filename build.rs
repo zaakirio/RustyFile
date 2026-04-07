@@ -12,7 +12,7 @@ fn main() {
             std::fs::write(
                 dist.join("index.html"),
                 "<!DOCTYPE html><html><body>Frontend not built. \
-                 Run: cd frontend &amp;&amp; pnpm build</body></html>",
+                 Run: cd frontend && pnpm build</body></html>",
             )
             .expect("failed to write frontend/dist/index.html stub");
         }
