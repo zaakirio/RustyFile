@@ -7,7 +7,7 @@ use tokio::net::TcpListener;
 use rustyfile::api::build_router;
 use rustyfile::config::AppConfig;
 use rustyfile::db::{create_pool, get_or_create_jwt_secret, run_migrations};
-use rustyfile::state::{AppState, LoginRateLimiter, SetupGuard};
+use rustyfile::state::{AppState, SetupGuard};
 
 #[allow(dead_code)]
 pub struct TestApp {
@@ -37,6 +37,7 @@ impl TestApp {
             max_upload_bytes: 50 * 1024 * 1024,
             max_password_length: 128,
             max_listing_items: 10_000,
+            trusted_proxies: "".into(),
         };
 
         let pool = create_pool(&config).expect("Failed to create pool");
@@ -51,10 +52,17 @@ impl TestApp {
             .canonicalize()
             .expect("Root temp dir must be canonicalizable");
 
-        let login_limiter = Arc::new(LoginRateLimiter::new(
-            100, // generous limit for tests
-            std::time::Duration::from_secs(60),
-        ));
+        let login_limiter = rustyfile::state::new_login_limiter(100, 60);
+
+        let dummy_hash = {
+            use argon2::password_hash::SaltString;
+            use argon2::PasswordHasher;
+            let salt = SaltString::generate(&mut rand::rngs::OsRng);
+            argon2::Argon2::default()
+                .hash_password(b"rustyfile_dummy_timing_password", &salt)
+                .expect("Failed to hash dummy password")
+                .to_string()
+        };
 
         let state = AppState {
             db: pool,
@@ -63,6 +71,7 @@ impl TestApp {
             jwt_secret,
             canonical_root,
             login_limiter,
+            dummy_hash,
         };
 
         let app = build_router(state);

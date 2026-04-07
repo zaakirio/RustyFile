@@ -5,11 +5,15 @@ pub mod health;
 pub mod middleware;
 pub mod setup;
 
+use std::time::Duration;
+
 use axum::extract::DefaultBodyLimit;
-use axum::http::{header, HeaderValue, Method};
-use axum::response::Redirect;
+use axum::http::{header, HeaderValue, Method, StatusCode};
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::get;
 use axum::Router;
+use tower::ServiceBuilder;
+use tower::timeout::TimeoutLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -17,6 +21,12 @@ use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
 
+/// Extract client IP from proxy headers.
+///
+/// **Security note:** This trusts X-Forwarded-For unconditionally.
+/// In production, ensure a reverse proxy (nginx, Traefik) strips/sets
+/// this header from untrusted sources. Configure `RUSTYFILE_TRUSTED_PROXIES`
+/// if direct client access is possible.
 pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
     headers
         .get("x-forwarded-for")
@@ -88,6 +98,12 @@ pub fn build_router(state: AppState) -> Router {
         ))
     };
 
+    let timeout_layer = ServiceBuilder::new()
+        .layer(axum::error_handling::HandleErrorLayer::new(
+            |_: tower::BoxError| async { StatusCode::REQUEST_TIMEOUT.into_response() },
+        ))
+        .layer(TimeoutLayer::new(Duration::from_secs(30)));
+
     let app = Router::new()
         .nest("/api", download_routes)
         .nest("/api", cached_api_routes)
@@ -95,6 +111,7 @@ pub fn build_router(state: AppState) -> Router {
         .layer(trace_layer)
         .layer(CompressionLayer::new())
         .layer(cors)
+        .layer(timeout_layer)
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state);
 
