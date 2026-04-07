@@ -12,28 +12,14 @@ use crate::db::user_repo;
 use crate::error::AppError;
 use crate::state::AppState;
 
-// ---------------------------------------------------------------------------
-// JWT Claims
-// ---------------------------------------------------------------------------
-
-/// JWT token claims embedded in every issued token.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    /// Subject -- the user's database ID.
     pub sub: i64,
-    /// The user's role (e.g. "admin", "user").
     pub role: String,
-    /// Expiration time as a UTC Unix timestamp.
     pub exp: usize,
-    /// Issued-at time as a UTC Unix timestamp.
     pub iat: usize,
 }
 
-// ---------------------------------------------------------------------------
-// Public helper functions (used by setup.rs and middleware)
-// ---------------------------------------------------------------------------
-
-/// Create a signed JWT for the given user.
 pub fn create_token(
     user_id: i64,
     role: &str,
@@ -60,7 +46,6 @@ pub fn create_token(
     Ok(token)
 }
 
-/// Validate a JWT and return the decoded claims.
 pub fn validate_token(token: &str, secret: &[u8]) -> Result<Claims, AppError> {
     let validation = Validation::default();
 
@@ -70,12 +55,8 @@ pub fn validate_token(token: &str, secret: &[u8]) -> Result<Claims, AppError> {
     Ok(token_data.claims)
 }
 
-/// Extract a bearer token from request headers.
-///
-/// Checks the `Authorization: Bearer <token>` header first, then falls back
-/// to the `rustyfile_token` cookie.
+/// Falls back to `rustyfile_token` cookie if no Authorization header.
 pub fn extract_token(headers: &HeaderMap) -> Result<String, AppError> {
-    // Try Authorization header first
     if let Some(auth_header) = headers.get("authorization") {
         let auth_str = auth_header
             .to_str()
@@ -89,7 +70,6 @@ pub fn extract_token(headers: &HeaderMap) -> Result<String, AppError> {
         }
     }
 
-    // Fall back to cookie
     if let Some(cookie_header) = headers.get("cookie") {
         let cookie_str = cookie_header
             .to_str()
@@ -110,10 +90,6 @@ pub fn extract_token(headers: &HeaderMap) -> Result<String, AppError> {
         "No authentication token provided".into(),
     ))
 }
-
-// ---------------------------------------------------------------------------
-// Request / response types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 struct LoginRequest {
@@ -137,16 +113,6 @@ struct LogoutResponse {
     message: String,
 }
 
-// ---------------------------------------------------------------------------
-// Route handlers
-// ---------------------------------------------------------------------------
-
-/// POST /auth/login -- authenticate with username and password.
-///
-/// Security hardening (patterns from Filestash, FileBrowser, Portainer):
-/// - Rate limiting per IP to prevent brute-force attacks.
-/// - Constant-time response: performs a dummy hash verification when the user
-///   is not found, preventing username enumeration via timing side-channels.
 async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -154,7 +120,6 @@ async fn login(
 ) -> Result<(StatusCode, Json<AuthResponse>), AppError> {
     let client_ip = extract_client_ip(&headers);
 
-    // Rate limit check.
     if !state.login_limiter.check_rate_limit(&client_ip) {
         tracing::warn!(client_ip = %client_ip, "Login rate limit exceeded");
         return Err(AppError::TooManyRequests(
@@ -176,7 +141,6 @@ async fn login(
                 return Err(AppError::Unauthorized("Invalid username or password".into()));
             }
 
-            // Successful login — reset rate limit for this IP.
             state.login_limiter.reset(&client_ip);
 
             let token = create_token(
@@ -189,8 +153,7 @@ async fn login(
             Ok((StatusCode::OK, Json(AuthResponse { token, user })))
         }
         None => {
-            // Perform a dummy hash to prevent timing-based username enumeration.
-            // This ensures the response time is similar whether the user exists or not.
+            // Dummy hash to prevent timing-based username enumeration.
             let dummy_salt = SaltString::from_b64("dW5rbm93bnVzZXJzYWx0").unwrap();
             let _ = Argon2::default()
                 .hash_password(body.password.as_bytes(), &dummy_salt);
@@ -200,18 +163,13 @@ async fn login(
     }
 }
 
-/// POST /auth/logout -- placeholder that acknowledges logout.
 async fn logout() -> Json<LogoutResponse> {
     Json(LogoutResponse {
         message: "Logged out".into(),
     })
 }
 
-/// POST /auth/refresh -- issue a fresh token from a valid existing token.
-///
-/// Verifies the user still exists in the database before issuing a new token.
-/// This prevents deleted/disabled users from refreshing stale tokens (pattern
-/// from Portainer's token refresh endpoint).
+/// Re-verifies user existence to prevent deleted users from refreshing tokens.
 async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -219,7 +177,6 @@ async fn refresh(
     let token = extract_token(&headers)?;
     let claims = validate_token(&token, &state.jwt_secret)?;
 
-    // Verify user still exists — a deleted user must not be able to refresh.
     let user = user_repo::find_by_id(&state.db, claims.sub)
         .await?
         .ok_or_else(|| AppError::Unauthorized("User no longer exists".into()))?;
@@ -233,10 +190,6 @@ async fn refresh(
 
     Ok(Json(RefreshResponse { token: new_token }))
 }
-
-// ---------------------------------------------------------------------------
-// Router
-// ---------------------------------------------------------------------------
 
 pub fn routes() -> Router<AppState> {
     Router::new()

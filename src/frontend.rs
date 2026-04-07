@@ -10,11 +10,6 @@ mod embedded {
     #[folder = "frontend/dist"]
     struct Assets;
 
-    /// Serve embedded frontend assets with SPA catch-all.
-    ///
-    /// - Exact file match in `frontend/dist/` -> serve with Content-Type + Cache-Control
-    /// - Path without file extension (SPA route) -> serve index.html
-    /// - Path with extension but no match -> 404
     pub async fn static_handler(uri: Uri) -> Response {
         let path = uri.path().trim_start_matches('/');
 
@@ -25,8 +20,7 @@ mod embedded {
         match Assets::get(path) {
             Some(file) => serve_file(path, file.data),
             None => {
-                // No dot = SPA route -> serve index.html for client-side routing
-                // Has dot = actual missing asset -> 404
+                // No dot = SPA route (serve index.html); dot = missing asset (404).
                 if path.contains('.') {
                     StatusCode::NOT_FOUND.into_response()
                 } else {
@@ -56,8 +50,7 @@ mod embedded {
             .first_or_octet_stream()
             .to_string();
 
-        // Vite hashed assets (assets/ dir) are immutable — cache aggressively.
-        // Everything else (index.html, favicon, etc.) must revalidate.
+        // Vite hashed assets are immutable; everything else must revalidate.
         let cache_control = if path.starts_with("assets/") {
             "public, max-age=31536000, immutable"
         } else {

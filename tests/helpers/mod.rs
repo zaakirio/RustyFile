@@ -9,10 +9,6 @@ use rustyfile::config::AppConfig;
 use rustyfile::db::{create_pool, get_or_create_jwt_secret, run_migrations};
 use rustyfile::state::{AppState, LoginRateLimiter, SetupGuard};
 
-/// A self-contained test application.
-///
-/// Each test gets its own temp directories, database, and ephemeral port so that
-/// tests can run in parallel without interfering with each other.
 #[allow(dead_code)]
 pub struct TestApp {
     pub addr: String,
@@ -23,7 +19,6 @@ pub struct TestApp {
 
 #[allow(dead_code)]
 impl TestApp {
-    /// Spin up a fully-initialised server on an OS-assigned port.
     pub async fn spawn() -> Self {
         let root_dir = TempDir::new().expect("Failed to create root temp dir");
         let data_dir = TempDir::new().expect("Failed to create data temp dir");
@@ -94,12 +89,10 @@ impl TestApp {
         }
     }
 
-    /// Build a full URL from a path like `/api/health`.
     pub fn url(&self, path: &str) -> String {
         format!("http://{}{}", self.addr, path)
     }
 
-    /// Create the initial admin account and return the JWT token.
     pub async fn create_admin(&self) -> String {
         let body = serde_json::json!({
             "username": "admin",
@@ -124,7 +117,6 @@ impl TestApp {
             .to_string()
     }
 
-    /// Write a file into the test root directory.
     pub fn write_file(&self, path: &str, content: &[u8]) {
         let full = self.root_dir.path().join(path);
         if let Some(parent) = full.parent() {
