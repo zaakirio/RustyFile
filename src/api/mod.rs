@@ -18,8 +18,8 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/health", health::routes())
         .nest("/setup", setup::routes())
         .nest("/auth", auth::routes())
-        .nest("/fs", files::routes())
-        .nest("/fs/download", download::routes());
+        .nest("/fs/download", download::routes(state.clone()))
+        .nest("/fs", files::routes(state.clone()));
 
     Router::new()
         .nest("/api", api_routes)
