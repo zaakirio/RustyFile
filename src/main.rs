@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 use rustyfile::api;
 use rustyfile::config::AppConfig;
 use rustyfile::db;
-use rustyfile::state::{AppState, SetupGuard};
+use rustyfile::state::{AppState, LoginRateLimiter, SetupGuard};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -51,12 +51,18 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
 
     // 8. Build shared application state
+    let login_limiter = Arc::new(LoginRateLimiter::new(
+        10, // max 10 attempts
+        std::time::Duration::from_secs(15 * 60), // per 15-minute window
+    ));
+
     let state = AppState {
         db: pool,
         config: config.clone(),
         setup_guard,
         jwt_secret,
         canonical_root,
+        login_limiter,
     };
 
     // 9. Build the router

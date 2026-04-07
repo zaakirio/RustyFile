@@ -31,6 +31,9 @@ pub struct CreateBody {
 #[derive(Debug, Deserialize)]
 pub struct RenameBody {
     pub destination: String,
+    /// Allow overwriting an existing destination (default: false).
+    #[serde(default)]
+    pub overwrite: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -68,10 +71,14 @@ async fn browse(
 
     let metadata = tokio::fs::metadata(&resolved)
         .await
-        .map_err(|_| AppError::NotFound(format!("Path not found: {user_path}")))?;
+        .map_err(|_| AppError::NotFound("Path not found".into()))?;
 
     if metadata.is_dir() {
-        let mut listing = file_ops::list_directory(&state.canonical_root, &resolved).await?;
+        let mut listing = file_ops::list_directory(
+            &state.canonical_root,
+            &resolved,
+            state.config.max_listing_items,
+        ).await?;
 
         // Sort items: directories first, then by the requested field.
         let sort_field = query.sort.as_deref().unwrap_or("name");
@@ -221,7 +228,7 @@ async fn rename_item(
     let from = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
     let to = file_ops::safe_resolve(&state.canonical_root, &body.destination)?;
 
-    file_ops::rename(&from, &to).await?;
+    file_ops::rename(&from, &to, body.overwrite).await?;
 
     Ok(Json(MutationResponse {
         message: format!("Renamed {user_path} -> {}", body.destination),
@@ -233,6 +240,8 @@ async fn rename_item(
 // ---------------------------------------------------------------------------
 
 pub fn routes(state: AppState) -> Router<AppState> {
+    let max_upload = state.config.max_upload_bytes;
+
     Router::new()
         .route("/", get(browse))
         .route(
@@ -244,6 +253,6 @@ pub fn routes(state: AppState) -> Router<AppState> {
                 .patch(rename_item),
         )
         .route_layer(middleware::from_fn_with_state(state, require_auth))
-        // Fix 10: Limit upload body to 5 MB for text editing
-        .layer(DefaultBodyLimit::max(5 * 1024 * 1024))
+        // Configurable upload body limit (default 50 MB).
+        .layer(DefaultBodyLimit::max(max_upload))
 }

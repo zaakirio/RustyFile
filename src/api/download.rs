@@ -134,7 +134,7 @@ async fn download(
     // Ensure target is a file.
     let metadata = tokio::fs::metadata(&resolved)
         .await
-        .map_err(|_| AppError::NotFound(format!("File not found: {user_path}")))?;
+        .map_err(|_| AppError::NotFound("File not found".into()))?;
 
     if metadata.is_dir() {
         return Err(AppError::BadRequest("Cannot download a directory".into()));

@@ -1,7 +1,7 @@
 pub mod user_repo;
 
 use deadpool_sqlite::{Config, Pool, Runtime};
-use rand::Rng;
+use rand::RngCore;
 use rusqlite::params;
 
 use crate::config::AppConfig;
@@ -87,9 +87,9 @@ pub async fn get_or_create_jwt_secret(pool: &Pool) -> Result<Vec<u8>, AppError> 
             return Ok(secret);
         }
 
-        // Generate new 64-byte secret
-        let mut rng = rand::thread_rng();
-        let secret: Vec<u8> = (0..64).map(|_| rng.gen()).collect();
+        // Generate new 64-byte secret using OS-level CSPRNG.
+        let mut secret = vec![0u8; 64];
+        rand::rngs::OsRng.fill_bytes(&mut secret);
 
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)",

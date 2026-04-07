@@ -1,8 +1,9 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use dashmap::DashMap;
 use deadpool_sqlite::Pool;
 
 use crate::config::AppConfig;
@@ -16,6 +17,66 @@ pub struct AppState {
     pub jwt_secret: Vec<u8>,
     /// Pre-canonicalized root path, computed once at startup.
     pub canonical_root: PathBuf,
+    /// In-memory login rate limiter keyed by IP address.
+    pub login_limiter: Arc<LoginRateLimiter>,
+}
+
+/// Simple sliding-window rate limiter for login attempts.
+///
+/// Tracks per-IP attempt counts with automatic expiry. Modelled after
+/// the approach used in FileBrowser and Portainer for brute-force
+/// protection.
+pub struct LoginRateLimiter {
+    /// Map of IP -> (attempt count, window start).
+    attempts: DashMap<String, (AtomicU32, Instant)>,
+    /// Maximum attempts allowed within the window.
+    max_attempts: u32,
+    /// Duration of the sliding window.
+    window: Duration,
+}
+
+impl LoginRateLimiter {
+    pub fn new(max_attempts: u32, window: Duration) -> Self {
+        Self {
+            attempts: DashMap::new(),
+            max_attempts,
+            window,
+        }
+    }
+
+    /// Record an attempt and return `true` if the request should be allowed.
+    pub fn check_rate_limit(&self, ip: &str) -> bool {
+        let now = Instant::now();
+
+        // Evict stale entries periodically (cheap check: only when map grows large).
+        if self.attempts.len() > 10_000 {
+            self.attempts.retain(|_, v| now.duration_since(v.1) < self.window);
+        }
+
+        let entry = self.attempts.entry(ip.to_string()).or_insert_with(|| {
+            (AtomicU32::new(0), now)
+        });
+
+        let (count, window_start) = entry.value();
+
+        // Reset if the window has expired.
+        if now.duration_since(*window_start) >= self.window {
+            count.store(1, Ordering::Relaxed);
+            // We can't mutate window_start through the shared ref in DashMap easily,
+            // so we drop and re-insert.
+            drop(entry);
+            self.attempts.insert(ip.to_string(), (AtomicU32::new(1), now));
+            return true;
+        }
+
+        let current = count.fetch_add(1, Ordering::Relaxed) + 1;
+        current <= self.max_attempts
+    }
+
+    /// Reset attempts for an IP after successful login.
+    pub fn reset(&self, ip: &str) {
+        self.attempts.remove(ip);
+    }
 }
 
 /// Guards the initial setup window.

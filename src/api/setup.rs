@@ -80,11 +80,19 @@ async fn create_admin(
         ));
     }
 
-    // Password: minimum length from config
+    // Password: minimum and maximum length from config.
+    // Max length prevents Argon2 DoS with extremely long passwords
+    // (pattern from Portainer's password policy enforcement).
     if body.password.len() < state.config.min_password_length {
         return Err(AppError::BadRequest(format!(
             "Password must be at least {} characters",
             state.config.min_password_length
+        )));
+    }
+    if body.password.len() > state.config.max_password_length {
+        return Err(AppError::BadRequest(format!(
+            "Password must not exceed {} characters",
+            state.config.max_password_length
         )));
     }
 

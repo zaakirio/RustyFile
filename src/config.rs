@@ -42,6 +42,22 @@ struct CliArgs {
     /// Setup wizard timeout in minutes
     #[arg(long, env = "RUSTYFILE_SETUP_TIMEOUT_MINUTES")]
     setup_timeout_minutes: Option<u64>,
+
+    /// Allowed CORS origins (comma-separated, or "*" for any)
+    #[arg(long, env = "RUSTYFILE_CORS_ORIGINS")]
+    cors_origins: Option<String>,
+
+    /// Maximum upload body size in bytes
+    #[arg(long, env = "RUSTYFILE_MAX_UPLOAD_BYTES")]
+    max_upload_bytes: Option<usize>,
+
+    /// Maximum password length
+    #[arg(long, env = "RUSTYFILE_MAX_PASSWORD_LENGTH")]
+    max_password_length: Option<usize>,
+
+    /// Maximum items in directory listing
+    #[arg(long, env = "RUSTYFILE_MAX_LISTING_ITEMS")]
+    max_listing_items: Option<usize>,
 }
 
 /// Application configuration with all fields guaranteed to have values.
@@ -73,6 +89,22 @@ pub struct AppConfig {
 
     #[serde(default = "default_setup_timeout_minutes")]
     pub setup_timeout_minutes: u64,
+
+    /// Comma-separated list of allowed CORS origins, or "*" for any.
+    #[serde(default = "default_cors_origins")]
+    pub cors_origins: String,
+
+    /// Maximum upload body size in bytes (default 50 MB).
+    #[serde(default = "default_max_upload_bytes")]
+    pub max_upload_bytes: usize,
+
+    /// Maximum password length to prevent Argon2 DoS.
+    #[serde(default = "default_max_password_length")]
+    pub max_password_length: usize,
+
+    /// Maximum items returned in a directory listing.
+    #[serde(default = "default_max_listing_items")]
+    pub max_listing_items: usize,
 }
 
 fn default_host() -> String {
@@ -102,6 +134,18 @@ fn default_min_password_length() -> usize {
 fn default_setup_timeout_minutes() -> u64 {
     5
 }
+fn default_cors_origins() -> String {
+    "*".into()
+}
+fn default_max_upload_bytes() -> usize {
+    50 * 1024 * 1024 // 50 MB
+}
+fn default_max_password_length() -> usize {
+    128
+}
+fn default_max_listing_items() -> usize {
+    10_000
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -115,6 +159,10 @@ impl Default for AppConfig {
             jwt_expiry_hours: default_jwt_expiry_hours(),
             min_password_length: default_min_password_length(),
             setup_timeout_minutes: default_setup_timeout_minutes(),
+            cors_origins: default_cors_origins(),
+            max_upload_bytes: default_max_upload_bytes(),
+            max_password_length: default_max_password_length(),
+            max_listing_items: default_max_listing_items(),
         }
     }
 }
@@ -160,6 +208,18 @@ impl AppConfig {
         }
         if let Some(v) = cli.setup_timeout_minutes {
             figment = figment.merge(Serialized::default("setup_timeout_minutes", v));
+        }
+        if let Some(v) = &cli.cors_origins {
+            figment = figment.merge(Serialized::default("cors_origins", v));
+        }
+        if let Some(v) = cli.max_upload_bytes {
+            figment = figment.merge(Serialized::default("max_upload_bytes", v));
+        }
+        if let Some(v) = cli.max_password_length {
+            figment = figment.merge(Serialized::default("max_password_length", v));
+        }
+        if let Some(v) = cli.max_listing_items {
+            figment = figment.merge(Serialized::default("max_listing_items", v));
         }
 
         let config: AppConfig = figment.extract()?;

@@ -26,6 +26,12 @@ pub struct DirListing {
     pub items: Vec<FileEntry>,
     pub num_dirs: usize,
     pub num_files: usize,
+    /// Total items before pagination (if truncated).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<usize>,
+    /// Whether the listing was truncated by the max_items limit.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -34,20 +40,38 @@ pub struct DirListing {
 
 /// Resolve a user-provided path safely within the given root directory.
 ///
-/// Strips `..`, `.`, and absolute prefixes -- only `Component::Normal` segments
-/// are kept. The resolved path is canonicalized and verified to remain under the
-/// canonical root to prevent directory-traversal attacks.
+/// Rejects null bytes and path traversal attempts. Only `Component::Normal`
+/// segments are kept. The resolved path is canonicalized and verified to remain
+/// under the canonical root to prevent directory-traversal attacks.
 ///
 /// `canonical_root` must already be canonicalized (computed once at startup).
 pub fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
+    // Reject null bytes — a classic path injection vector.
+    if user_path.as_bytes().contains(&0) {
+        return Err(AppError::BadRequest("Invalid path: null bytes not allowed".into()));
+    }
+
+    // Reject paths containing backslash (normalise on forward-slash only).
+    if user_path.contains('\\') {
+        return Err(AppError::BadRequest("Invalid path: backslashes not allowed".into()));
+    }
+
     // Build a clean relative path from only Normal components.
     let mut relative = PathBuf::new();
     for component in Path::new(user_path).components() {
-        if let Component::Normal(seg) = component {
-            relative.push(seg);
+        match component {
+            Component::Normal(seg) => {
+                // Reject segment-level dangerous names.
+                let s = seg.to_string_lossy();
+                if s.starts_with('.') && s != "." {
+                    // Allow dotfiles but log them; reject pure ".." (already filtered).
+                }
+                relative.push(seg);
+            }
+            // All other components (RootDir, CurDir, ParentDir, Prefix) are
+            // silently dropped to prevent directory-traversal attacks.
+            _ => {}
         }
-        // All other components (RootDir, CurDir, ParentDir, Prefix) are
-        // silently dropped to prevent directory-traversal attacks.
     }
 
     let target = canonical_root.join(&relative);
@@ -88,17 +112,29 @@ pub fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, A
 // ---------------------------------------------------------------------------
 
 /// List the contents of a directory, returning metadata for every entry.
+///
+/// `max_items` caps the number of entries returned to prevent unbounded memory
+/// usage on huge directories (pattern from FileBrowser's paginated listing).
 pub async fn list_directory(
     canonical_root: &Path,
     dir_path: &Path,
+    max_items: usize,
 ) -> Result<DirListing, AppError> {
     let mut entries = tokio::fs::read_dir(dir_path)
         .await
-        .map_err(|e| AppError::NotFound(format!("Cannot read directory: {e}")))?;
+        .map_err(|_| AppError::NotFound("Cannot read directory".into()))?;
 
     let mut items = Vec::new();
+    let mut total_count: usize = 0;
 
     while let Some(entry) = entries.next_entry().await.map_err(AppError::Io)? {
+        total_count += 1;
+
+        // Stop collecting after max_items but keep counting total.
+        if items.len() >= max_items {
+            continue;
+        }
+
         let metadata = entry.metadata().await.map_err(AppError::Io)?;
         let entry_path = entry.path();
 
@@ -107,7 +143,7 @@ pub async fn list_directory(
             .strip_prefix(canonical_root)
             .unwrap_or(&entry_path)
             .to_string_lossy()
-            .to_string();
+            .into_owned();
 
         let is_dir = metadata.is_dir();
         let size = if is_dir { 0 } else { metadata.len() };
@@ -120,14 +156,14 @@ pub async fn list_directory(
         let name = entry
             .file_name()
             .to_string_lossy()
-            .to_string();
+            .into_owned();
 
         let extension = if is_dir {
             None
         } else {
             entry_path
                 .extension()
-                .map(|e| e.to_string_lossy().to_string())
+                .map(|e| e.to_string_lossy().into_owned())
         };
 
         let mime_type = if is_dir {
@@ -151,19 +187,22 @@ pub async fn list_directory(
 
     let num_dirs = items.iter().filter(|e| e.is_dir).count();
     let num_files = items.iter().filter(|e| !e.is_dir).count();
+    let truncated = total_count > max_items;
 
     // Compute the listing path relative to root.
     let listing_path = dir_path
         .strip_prefix(canonical_root)
         .unwrap_or(Path::new(""))
         .to_string_lossy()
-        .to_string();
+        .into_owned();
 
     Ok(DirListing {
         path: listing_path,
         items,
         num_dirs,
         num_files,
+        total: if truncated { Some(total_count) } else { None },
+        truncated,
     })
 }
 
@@ -175,7 +214,13 @@ pub async fn list_directory(
 pub async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
     let metadata = tokio::fs::metadata(file_path)
         .await
-        .map_err(|_| AppError::NotFound(format!("File not found: {}", file_path.display())))?;
+        .map_err(|_| {
+            // Return only the relative path to avoid leaking server filesystem layout.
+            let rel = file_path
+                .strip_prefix(canonical_root)
+                .unwrap_or(Path::new("unknown"));
+            AppError::NotFound(format!("Not found: {}", rel.display()))
+        })?;
 
     let is_dir = metadata.is_dir();
     let size = if is_dir { 0 } else { metadata.len() };
@@ -233,7 +278,7 @@ pub async fn read_text_content(file_path: &Path) -> Result<String, AppError> {
 
     let metadata = tokio::fs::metadata(file_path)
         .await
-        .map_err(|_| AppError::NotFound(format!("File not found: {}", file_path.display())))?;
+        .map_err(|_| AppError::NotFound("File not found".into()))?;
 
     if metadata.len() > MAX_SIZE {
         return Err(AppError::BadRequest(
@@ -291,7 +336,7 @@ pub async fn create_directory(dir_path: &Path) -> Result<(), AppError> {
 pub async fn delete(file_path: &Path) -> Result<(), AppError> {
     let metadata = tokio::fs::metadata(file_path)
         .await
-        .map_err(|_| AppError::NotFound(format!("Path not found: {}", file_path.display())))?;
+        .map_err(|_| AppError::NotFound("Path not found".into()))?;
 
     if metadata.is_dir() {
         tokio::fs::remove_dir_all(file_path)
@@ -305,12 +350,21 @@ pub async fn delete(file_path: &Path) -> Result<(), AppError> {
 }
 
 /// Rename (move) a file or directory. Ensures the destination's parent exists.
-/// Fix 15: Removed TOCTOU pre-check; maps IO error directly.
-pub async fn rename(from: &Path, to: &Path) -> Result<(), AppError> {
+///
+/// Refuses to overwrite an existing destination to prevent silent data loss
+/// (pattern from FileBrowser which returns 409 Conflict on overwrite attempts).
+pub async fn rename(from: &Path, to: &Path, overwrite: bool) -> Result<(), AppError> {
     if let Some(parent) = to.parent() {
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(AppError::Io)?;
+    }
+
+    // Check for overwrite unless explicitly allowed.
+    if !overwrite && to.exists() {
+        return Err(AppError::Conflict(
+            "Destination already exists".into(),
+        ));
     }
 
     tokio::fs::rename(from, to).await.map_err(|e| match e.kind() {

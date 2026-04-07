@@ -7,7 +7,7 @@ use tokio::net::TcpListener;
 use rustyfile::api::build_router;
 use rustyfile::config::AppConfig;
 use rustyfile::db::{create_pool, get_or_create_jwt_secret, run_migrations};
-use rustyfile::state::{AppState, SetupGuard};
+use rustyfile::state::{AppState, LoginRateLimiter, SetupGuard};
 
 /// A self-contained test application.
 ///
@@ -38,6 +38,10 @@ impl TestApp {
             jwt_expiry_hours: 2,
             min_password_length: 10,
             setup_timeout_minutes: 5,
+            cors_origins: "*".into(),
+            max_upload_bytes: 50 * 1024 * 1024,
+            max_password_length: 128,
+            max_listing_items: 10_000,
         };
 
         let pool = create_pool(&config).expect("Failed to create pool");
@@ -52,12 +56,18 @@ impl TestApp {
             .canonicalize()
             .expect("Root temp dir must be canonicalizable");
 
+        let login_limiter = Arc::new(LoginRateLimiter::new(
+            100, // generous limit for tests
+            std::time::Duration::from_secs(60),
+        ));
+
         let state = AppState {
             db: pool,
             config,
             setup_guard,
             jwt_secret,
             canonical_root,
+            login_limiter,
         };
 
         let app = build_router(state);

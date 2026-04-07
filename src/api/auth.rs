@@ -1,4 +1,5 @@
-use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::SaltString;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
@@ -6,6 +7,7 @@ use axum::{Json, Router};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
+use crate::api::extract_client_ip;
 use crate::db::user_repo;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -140,30 +142,62 @@ struct LogoutResponse {
 // ---------------------------------------------------------------------------
 
 /// POST /auth/login -- authenticate with username and password.
+///
+/// Security hardening (patterns from Filestash, FileBrowser, Portainer):
+/// - Rate limiting per IP to prevent brute-force attacks.
+/// - Constant-time response: performs a dummy hash verification when the user
+///   is not found, preventing username enumeration via timing side-channels.
 async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), AppError> {
-    let user = user_repo::find_by_username(&state.db, &body.username)
-        .await?
-        .ok_or_else(|| AppError::Unauthorized("Invalid username or password".into()))?;
+    let client_ip = extract_client_ip(&headers);
 
-    // Verify the password against the stored hash
-    let parsed_hash = PasswordHash::new(&user.password_hash)
-        .map_err(|e| AppError::Internal(format!("Password hash parse error: {e}")))?;
+    // Rate limit check.
+    if !state.login_limiter.check_rate_limit(&client_ip) {
+        tracing::warn!(client_ip = %client_ip, "Login rate limit exceeded");
+        return Err(AppError::TooManyRequests(
+            "Too many login attempts. Please try again later.".into(),
+        ));
+    }
 
-    Argon2::default()
-        .verify_password(body.password.as_bytes(), &parsed_hash)
-        .map_err(|_| AppError::Unauthorized("Invalid username or password".into()))?;
+    let maybe_user = user_repo::find_by_username(&state.db, &body.username).await?;
 
-    let token = create_token(
-        user.id,
-        &user.role,
-        &state.jwt_secret,
-        state.config.jwt_expiry_hours,
-    )?;
+    match maybe_user {
+        Some(user) => {
+            let parsed_hash = PasswordHash::new(&user.password_hash)
+                .map_err(|e| AppError::Internal(format!("Password hash parse error: {e}")))?;
 
-    Ok((StatusCode::OK, Json(AuthResponse { token, user })))
+            if Argon2::default()
+                .verify_password(body.password.as_bytes(), &parsed_hash)
+                .is_err()
+            {
+                return Err(AppError::Unauthorized("Invalid username or password".into()));
+            }
+
+            // Successful login — reset rate limit for this IP.
+            state.login_limiter.reset(&client_ip);
+
+            let token = create_token(
+                user.id,
+                &user.role,
+                &state.jwt_secret,
+                state.config.jwt_expiry_hours,
+            )?;
+
+            Ok((StatusCode::OK, Json(AuthResponse { token, user })))
+        }
+        None => {
+            // Perform a dummy hash to prevent timing-based username enumeration.
+            // This ensures the response time is similar whether the user exists or not.
+            let dummy_salt = SaltString::from_b64("dW5rbm93bnVzZXJzYWx0").unwrap();
+            let _ = Argon2::default()
+                .hash_password(body.password.as_bytes(), &dummy_salt);
+
+            Err(AppError::Unauthorized("Invalid username or password".into()))
+        }
+    }
 }
 
 /// POST /auth/logout -- placeholder that acknowledges logout.
@@ -174,6 +208,10 @@ async fn logout() -> Json<LogoutResponse> {
 }
 
 /// POST /auth/refresh -- issue a fresh token from a valid existing token.
+///
+/// Verifies the user still exists in the database before issuing a new token.
+/// This prevents deleted/disabled users from refreshing stale tokens (pattern
+/// from Portainer's token refresh endpoint).
 async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -181,9 +219,14 @@ async fn refresh(
     let token = extract_token(&headers)?;
     let claims = validate_token(&token, &state.jwt_secret)?;
 
+    // Verify user still exists — a deleted user must not be able to refresh.
+    let user = user_repo::find_by_id(&state.db, claims.sub)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("User no longer exists".into()))?;
+
     let new_token = create_token(
-        claims.sub,
-        &claims.role,
+        user.id,
+        &user.role,
         &state.jwt_secret,
         state.config.jwt_expiry_hours,
     )?;

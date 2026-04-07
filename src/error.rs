@@ -25,6 +25,9 @@ pub enum AppError {
     #[error("Setup expired")]
     SetupExpired,
 
+    #[error("Too many requests: {0}")]
+    TooManyRequests(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 
@@ -54,6 +57,10 @@ impl IntoResponse for AppError {
             }
             AppError::SetupExpired => {
                 (StatusCode::GONE, "Setup window expired".into())
+            }
+            AppError::TooManyRequests(msg) => {
+                tracing::warn!("Rate limited: {msg}");
+                (StatusCode::TOO_MANY_REQUESTS, msg.clone())
             }
             AppError::Internal(msg) => {
                 tracing::error!("Internal error: {msg}");

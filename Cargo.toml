@@ -8,7 +8,7 @@ rust-version = "1.80"
 axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "set-header"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "set-header", "limit"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -27,9 +27,10 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 mime_guess = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+dashmap = "6"
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json", "cookies"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
 tempfile = "3"
 tokio-test = "0.4"
 
