@@ -5,6 +5,8 @@ pub mod health;
 pub mod middleware;
 pub mod setup;
 
+use axum::response::Redirect;
+use axum::routing::get;
 use axum::Router;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
@@ -19,7 +21,9 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/setup", setup::routes())
         .nest("/auth", auth::routes())
         .nest("/fs/download", download::routes(state.clone()))
-        .nest("/fs", files::routes(state.clone()));
+        .nest("/fs", files::routes(state.clone()))
+        // Handle /fs/ with trailing slash (Axum nest doesn't match trailing slash)
+        .route("/fs/", get(|| async { Redirect::permanent("/api/fs") }));
 
     Router::new()
         .nest("/api", api_routes)
