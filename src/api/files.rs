@@ -168,7 +168,8 @@ async fn save_file(
     file_ops::write_file(&resolved, &body).await?;
 
     if let Some(parent) = resolved.parent() {
-        state.dir_cache.invalidate(&parent.to_string_lossy()).await;
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
     }
 
     Ok((
@@ -197,7 +198,8 @@ async fn create(
     file_ops::create_directory(&resolved).await?;
 
     if let Some(parent) = resolved.parent() {
-        state.dir_cache.invalidate(&parent.to_string_lossy()).await;
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
     }
 
     Ok((
@@ -219,7 +221,8 @@ async fn remove(
     file_ops::delete(&resolved).await?;
 
     if let Some(parent) = resolved.parent() {
-        state.dir_cache.invalidate(&parent.to_string_lossy()).await;
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
     }
 
     Ok(Json(MutationResponse {
@@ -240,10 +243,12 @@ async fn rename_item(
     file_ops::rename(&from, &to, body.overwrite).await?;
 
     if let Some(parent) = from.parent() {
-        state.dir_cache.invalidate(&parent.to_string_lossy()).await;
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
     }
     if let Some(parent) = to.parent() {
-        state.dir_cache.invalidate(&parent.to_string_lossy()).await;
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
     }
 
     Ok(Json(MutationResponse {
