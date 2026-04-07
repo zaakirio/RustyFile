@@ -137,7 +137,9 @@ async fn login(
                 .verify_password(body.password.as_bytes(), &parsed_hash)
                 .is_err()
             {
-                return Err(AppError::Unauthorized("Invalid username or password".into()));
+                return Err(AppError::Unauthorized(
+                    "Invalid username or password".into(),
+                ));
             }
 
             let token = create_token(
@@ -156,17 +158,20 @@ async fn login(
             Ok((
                 StatusCode::OK,
                 [(axum::http::header::SET_COOKIE, cookie)],
-                Json(AuthResponse { token: token.clone(), user }),
+                Json(AuthResponse {
+                    token: token.clone(),
+                    user,
+                }),
             ))
         }
         None => {
             // Constant-time failure: verify against pre-hashed dummy.
-            let parsed = PasswordHash::new(&state.dummy_hash)
-                .expect("Dummy hash is valid PHC");
-            let _ = Argon2::default()
-                .verify_password(body.password.as_bytes(), &parsed);
+            let parsed = PasswordHash::new(&state.dummy_hash).expect("Dummy hash is valid PHC");
+            let _ = Argon2::default().verify_password(body.password.as_bytes(), &parsed);
 
-            Err(AppError::Unauthorized("Invalid username or password".into()))
+            Err(AppError::Unauthorized(
+                "Invalid username or password".into(),
+            ))
         }
     }
 }
@@ -175,7 +180,9 @@ async fn logout() -> impl axum::response::IntoResponse {
     let clear_cookie = "rustyfile_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0";
     (
         [(axum::http::header::SET_COOKIE, clear_cookie.to_string())],
-        Json(LogoutResponse { message: "Logged out".into() }),
+        Json(LogoutResponse {
+            message: "Logged out".into(),
+        }),
     )
 }
 

@@ -46,3 +46,10 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+[lints.clippy]
+implicit_clone = "warn"
+use_self = "warn"
+format_push_string = "warn"
+manual_let_else = "warn"
+needless_pass_by_value = "warn"

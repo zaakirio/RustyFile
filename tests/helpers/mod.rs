@@ -41,7 +41,9 @@ impl TestApp {
         };
 
         let pool = create_pool(&config).expect("Failed to create pool");
-        run_migrations(&pool).await.expect("Failed to run migrations");
+        run_migrations(&pool)
+            .await
+            .expect("Failed to run migrations");
 
         let setup_guard = Arc::new(SetupGuard::new(config.setup_timeout_minutes));
         let jwt_secret = get_or_create_jwt_secret(&pool)

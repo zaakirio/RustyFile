@@ -10,9 +10,7 @@ pub fn routes() -> Router<AppState> {
     Router::new().route("/", get(health_check))
 }
 
-async fn health_check(
-    State(state): State<AppState>,
-) -> axum::Json<serde_json::Value> {
+async fn health_check(State(state): State<AppState>) -> axum::Json<serde_json::Value> {
     let db_ok = db::interact(&state.db, |conn| {
         conn.execute_batch("SELECT 1")?;
         Ok(())

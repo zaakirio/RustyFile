@@ -12,8 +12,8 @@ use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::get;
 use axum::Router;
-use tower::ServiceBuilder;
 use tower::timeout::TimeoutLayer;
+use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -58,13 +58,12 @@ pub fn build_router(state: AppState) -> Router {
         ));
 
     // Download routes set their own Cache-Control, so they're layered separately.
-    let download_routes = Router::new()
-        .nest("/fs/download", download::routes(state.clone()));
+    let download_routes = Router::new().nest("/fs/download", download::routes(state.clone()));
 
     let cors = build_cors_layer(&state.config.cors_origins);
 
-    let trace_layer = TraceLayer::new_for_http().make_span_with(
-        |request: &axum::http::Request<_>| {
+    let trace_layer =
+        TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
             let client_ip = extract_client_ip(request.headers());
             tracing::info_span!(
                 "request",
@@ -72,8 +71,7 @@ pub fn build_router(state: AppState) -> Router {
                 uri = %request.uri(),
                 client_ip = %client_ip,
             )
-        },
-    );
+        });
 
     let security_headers = |r: Router| {
         r.layer(SetResponseHeaderLayer::overriding(

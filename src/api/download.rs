@@ -125,7 +125,9 @@ async fn download(
 
     let etag = format!("\"{:x}-{:x}\"", file_size, modified.timestamp());
 
-    if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok())
+    if let Some(if_none_match) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
     {
         if if_none_match == etag || if_none_match == "*" {
             return Response::builder()
@@ -163,14 +165,20 @@ async fn download(
     let inline = query.inline.unwrap_or(false);
     let disposition = content_disposition(&filename, inline);
 
-    let range_header = headers
-        .get(header::RANGE)
-        .and_then(|v| v.to_str().ok());
+    let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
 
     match range_header.and_then(|h| parse_range(h, file_size)) {
         Some(range) => {
-            serve_partial(resolved, file_size, range, &mime, &disposition, &last_modified, &etag)
-                .await
+            serve_partial(
+                resolved,
+                file_size,
+                range,
+                &mime,
+                &disposition,
+                &last_modified,
+                &etag,
+            )
+            .await
         }
         None if range_header.is_some() => {
             let body = Body::empty();
@@ -180,7 +188,17 @@ async fn download(
                 .body(body)
                 .map_err(|e| AppError::Internal(e.to_string()))
         }
-        None => serve_full(resolved, file_size, &mime, &disposition, &last_modified, &etag).await,
+        None => {
+            serve_full(
+                resolved,
+                file_size,
+                &mime,
+                &disposition,
+                &last_modified,
+                &etag,
+            )
+            .await
+        }
     }
 }
 

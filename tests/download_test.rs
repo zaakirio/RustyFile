@@ -130,7 +130,11 @@ async fn download_open_ended_range() {
     );
 
     let body = resp.bytes().await.expect("Failed to read body");
-    assert_eq!(body.len(), 1500, "Open-ended range from 500 should return 1500 bytes");
+    assert_eq!(
+        body.len(),
+        1500,
+        "Open-ended range from 500 should return 1500 bytes"
+    );
 }
 
 #[tokio::test]

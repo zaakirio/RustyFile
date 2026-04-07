@@ -64,7 +64,8 @@ async fn browse(
             &state.canonical_root,
             &resolved,
             state.config.max_listing_items,
-        ).await?;
+        )
+        .await?;
 
         let sort_field = query.sort.as_deref().unwrap_or("name");
         let ascending = query.order.as_deref().unwrap_or("asc") != "desc";
@@ -87,10 +88,16 @@ async fn browse(
                 _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             };
 
-            if ascending { ord } else { ord.reverse() }
+            if ascending {
+                ord
+            } else {
+                ord.reverse()
+            }
         });
 
-        Ok(Json(serde_json::to_value(&listing).map_err(AppError::Json)?))
+        Ok(Json(
+            serde_json::to_value(&listing).map_err(AppError::Json)?,
+        ))
     } else {
         let entry = file_ops::file_info(&state.canonical_root, &resolved).await?;
 
@@ -124,7 +131,11 @@ async fn browse(
             .unwrap_or(false)
         {
             let subs = file_ops::detect_subtitles(resolved.clone()).await;
-            if subs.is_empty() { None } else { Some(subs) }
+            if subs.is_empty() {
+                None
+            } else {
+                Some(subs)
+            }
         } else {
             None
         };
@@ -135,7 +146,9 @@ async fn browse(
             subtitles,
         };
 
-        Ok(Json(serde_json::to_value(&response).map_err(AppError::Json)?))
+        Ok(Json(
+            serde_json::to_value(&response).map_err(AppError::Json)?,
+        ))
     }
 }
 

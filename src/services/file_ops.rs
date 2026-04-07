@@ -32,11 +32,15 @@ pub struct DirListing {
 /// null bytes. `canonical_root` must already be canonicalized.
 pub fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
     if user_path.as_bytes().contains(&0) {
-        return Err(AppError::BadRequest("Invalid path: null bytes not allowed".into()));
+        return Err(AppError::BadRequest(
+            "Invalid path: null bytes not allowed".into(),
+        ));
     }
 
     if user_path.contains('\\') {
-        return Err(AppError::BadRequest("Invalid path: backslashes not allowed".into()));
+        return Err(AppError::BadRequest(
+            "Invalid path: backslashes not allowed".into(),
+        ));
     }
 
     // Only Normal components are kept; RootDir/CurDir/ParentDir/Prefix
@@ -115,10 +119,7 @@ pub async fn list_directory(
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
             .into();
 
-        let name = entry
-            .file_name()
-            .to_string_lossy()
-            .into_owned();
+        let name = entry.file_name().to_string_lossy().into_owned();
 
         let extension = if is_dir {
             None
@@ -171,15 +172,13 @@ pub async fn list_directory(
 }
 
 pub async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
-    let metadata = tokio::fs::metadata(file_path)
-        .await
-        .map_err(|_| {
-            // Use relative path to avoid leaking server filesystem layout.
-            let rel = file_path
-                .strip_prefix(canonical_root)
-                .unwrap_or(Path::new("unknown"));
-            AppError::NotFound(format!("Not found: {}", rel.display()))
-        })?;
+    let metadata = tokio::fs::metadata(file_path).await.map_err(|_| {
+        // Use relative path to avoid leaking server filesystem layout.
+        let rel = file_path
+            .strip_prefix(canonical_root)
+            .unwrap_or(Path::new("unknown"));
+        AppError::NotFound(format!("Not found: {}", rel.display()))
+    })?;
 
     let is_dir = metadata.is_dir();
     let size = if is_dir { 0 } else { metadata.len() };
@@ -252,12 +251,11 @@ pub async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), AppError
         .parent()
         .ok_or_else(|| AppError::BadRequest("Invalid file path".into()))?;
 
-    tokio::fs::create_dir_all(parent).await.map_err(AppError::Io)?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(AppError::Io)?;
 
-    let tmp_name = format!(
-        ".rustyfile_tmp_{}",
-        uuid::Uuid::new_v4().as_hyphenated()
-    );
+    let tmp_name = format!(".rustyfile_tmp_{}", uuid::Uuid::new_v4().as_hyphenated());
     let tmp_path = parent.join(tmp_name);
 
     {
@@ -273,15 +271,13 @@ pub async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), AppError
         file.sync_data().await.map_err(AppError::Io)?;
     }
 
-    tokio::fs::rename(&tmp_path, file_path)
-        .await
-        .map_err(|e| {
-            let tmp = tmp_path.clone();
-            tokio::spawn(async move {
-                let _ = tokio::fs::remove_file(tmp).await;
-            });
-            AppError::Io(e)
-        })?;
+    tokio::fs::rename(&tmp_path, file_path).await.map_err(|e| {
+        let tmp = tmp_path.clone();
+        tokio::spawn(async move {
+            let _ = tokio::fs::remove_file(tmp).await;
+        });
+        AppError::Io(e)
+    })?;
 
     Ok(())
 }
@@ -303,7 +299,9 @@ pub async fn create_directory(dir_path: &Path) -> Result<(), AppError> {
 
 pub async fn delete(canonical_root: &Path, file_path: &Path) -> Result<(), AppError> {
     if file_path == canonical_root {
-        return Err(AppError::Forbidden("Cannot delete the root directory".into()));
+        return Err(AppError::Forbidden(
+            "Cannot delete the root directory".into(),
+        ));
     }
 
     let metadata = tokio::fs::metadata(file_path)
@@ -335,15 +333,15 @@ pub async fn rename(from: &Path, to: &Path, overwrite: bool) -> Result<(), AppEr
     }
 
     if !overwrite && to.exists() {
-        return Err(AppError::Conflict(
-            "Destination already exists".into(),
-        ));
+        return Err(AppError::Conflict("Destination already exists".into()));
     }
 
-    tokio::fs::rename(from, to).await.map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => AppError::NotFound("Source not found".into()),
-        _ => AppError::Io(e),
-    })
+    tokio::fs::rename(from, to)
+        .await
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => AppError::NotFound("Source not found".into()),
+            _ => AppError::Io(e),
+        })
 }
 
 pub async fn detect_subtitles(video_path: PathBuf) -> Vec<String> {
@@ -353,9 +351,8 @@ pub async fn detect_subtitles(video_path: PathBuf) -> Vec<String> {
 }
 
 fn detect_subtitles_sync(video_path: &Path) -> Vec<String> {
-    let parent = match video_path.parent() {
-        Some(p) => p,
-        None => return Vec::new(),
+    let Some(parent) = video_path.parent() else {
+        return Vec::new();
     };
 
     let stem = match video_path.file_stem() {
@@ -366,9 +363,8 @@ fn detect_subtitles_sync(video_path: &Path) -> Vec<String> {
     let subtitle_extensions = ["vtt", "srt", "ass", "ssa"];
     let mut subtitles = Vec::new();
 
-    let entries = match std::fs::read_dir(parent) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return Vec::new();
     };
 
     for entry in entries.flatten() {

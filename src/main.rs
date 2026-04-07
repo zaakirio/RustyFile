@@ -84,8 +84,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn init_logging(config: &AppConfig) {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&config.log_level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
 
     match config.log_format.as_str() {
         "json" => {
@@ -95,9 +95,7 @@ fn init_logging(config: &AppConfig) {
                 .init();
         }
         _ => {
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .init();
+            tracing_subscriber::fmt().with_env_filter(env_filter).init();
         }
     }
 }
@@ -109,9 +107,8 @@ async fn cleanup_orphan_temp_files(root: &str) {
     let mut count = 0u32;
 
     while let Some(dir) = stack.pop() {
-        let mut entries = match fs::read_dir(&dir).await {
-            Ok(e) => e,
-            Err(_) => continue,
+        let Ok(mut entries) = fs::read_dir(&dir).await else {
+            continue;
         };
         while let Ok(Some(entry)) = entries.next_entry().await {
             let name = entry.file_name();

@@ -181,7 +181,7 @@ impl AppConfig {
         let cli = CliArgs::parse();
 
         let mut figment = Figment::new()
-            .merge(Serialized::defaults(AppConfig::default()))
+            .merge(Serialized::defaults(Self::default()))
             .merge(Toml::file("config.toml").nested())
             .merge(Env::prefixed("RUSTYFILE_").lowercase(false));
 
@@ -228,7 +228,7 @@ impl AppConfig {
             figment = figment.merge(Serialized::default("trusted_proxies", v));
         }
 
-        let config: AppConfig = figment.extract()?;
+        let config: Self = figment.extract()?;
         Ok(config)
     }
 

@@ -47,40 +47,51 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
-            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
-            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
-            AppError::SetupRequired => {
-                (StatusCode::PRECONDITION_REQUIRED, "Setup required".into())
-            }
-            AppError::SetupExpired => {
-                (StatusCode::GONE, "Setup window expired".into())
-            }
-            AppError::TooManyRequests(msg) => {
+            Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
+            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
+            Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            Self::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            Self::SetupRequired => (StatusCode::PRECONDITION_REQUIRED, "Setup required".into()),
+            Self::SetupExpired => (StatusCode::GONE, "Setup window expired".into()),
+            Self::TooManyRequests(msg) => {
                 tracing::warn!("Rate limited: {msg}");
                 (StatusCode::TOO_MANY_REQUESTS, msg.clone())
             }
-            AppError::Internal(msg) => {
+            Self::Internal(msg) => {
                 tracing::error!("Internal error: {msg}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".into())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error".into(),
+                )
             }
-            AppError::Database(e) => {
+            Self::Database(e) => {
                 tracing::error!("Database error: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".into())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error".into(),
+                )
             }
-            AppError::Pool(msg) => {
+            Self::Pool(msg) => {
                 tracing::error!("Pool error: {msg}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".into())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error".into(),
+                )
             }
-            AppError::Io(e) => {
+            Self::Io(e) => {
                 tracing::error!("IO error: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".into())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error".into(),
+                )
             }
-            AppError::Json(e) => {
+            Self::Json(e) => {
                 tracing::error!("JSON error: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".into())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error".into(),
+                )
             }
         };
 
