@@ -22,7 +22,7 @@ RUN cargo build --release
 
 # Stage 3: Runtime
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates ffmpeg \
     && adduser -D -u 1000 rustyfile \
     && mkdir -p /data /config \
     && chown rustyfile:rustyfile /data /config

@@ -117,7 +117,12 @@ async fn download(
         .into();
     let last_modified = modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
-    let etag = format!("\"{:x}-{:x}\"", file_size, modified.timestamp());
+    let etag = {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&file_size.to_le_bytes());
+        hasher.update(&modified.timestamp().to_le_bytes());
+        format!("\"{}\"", &hasher.finalize().to_hex()[..32])
+    };
 
     if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok())
     {

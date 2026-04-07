@@ -1,4 +1,4 @@
-.PHONY: dev build test lint docker clean
+.PHONY: dev build test lint docker clean docker-multi
 
 # Start frontend dev server + backend in parallel.
 # Vite proxies /api to the Rust backend on port 8080.
@@ -25,7 +25,11 @@ lint:
 docker:
 	docker buildx build -t rustyfile:latest .
 
+# Build multi-arch Docker image.
+docker-multi:
+	docker buildx build --platform linux/amd64,linux/arm64 -t rustyfile:latest .
+
 # Remove all build artifacts.
 clean:
 	cargo clean
-	rm -rf frontend/dist frontend/node_modules
+	rm -rf tmp-data rustyfile-data frontend/dist frontend/node_modules

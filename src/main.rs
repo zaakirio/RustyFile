@@ -18,7 +18,10 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::fs::create_dir_all(&config.root).await?;
     tokio::fs::create_dir_all(&config.data_dir).await?;
-    tracing::info!(root = %config.root, data_dir = %config.data_dir, "Directories ensured");
+    // TUS upload temp directory
+    let tus_upload_dir = std::path::PathBuf::from(&config.cache_dir).join("uploads");
+    tokio::fs::create_dir_all(&tus_upload_dir).await?;
+    tracing::info!(root = %config.root, data_dir = %config.data_dir, cache_dir = %config.cache_dir, "Directories ensured");
 
     let pool = db::create_pool(&config)?;
     db::run_migrations(&pool).await?;
@@ -43,6 +46,65 @@ async fn main() -> anyhow::Result<()> {
         .expect("Root directory must exist and be accessible");
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
 
+    let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
+
+    // Spawn filesystem watcher for cache invalidation
+    {
+        use notify::RecursiveMode;
+        use notify_debouncer_full::new_debouncer;
+
+        let dir_cache_watcher = dir_cache.clone();
+        let watch_root = canonical_root.clone();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+
+        let mut debouncer = new_debouncer(
+            std::time::Duration::from_millis(500),
+            None,
+            move |result: notify_debouncer_full::DebounceEventResult| {
+                let _ = tx.blocking_send(result);
+            },
+        )
+        .expect("Failed to create filesystem watcher");
+
+        debouncer
+            .watch(&watch_root, RecursiveMode::Recursive)
+            .expect("Failed to watch root directory");
+
+        tokio::spawn(async move {
+            let _debouncer = debouncer; // Keep alive
+            while let Some(Ok(events)) = rx.recv().await {
+                for event in events {
+                    for path in &event.paths {
+                        if let Some(parent) = path.parent() {
+                            let key = parent.to_string_lossy().to_string();
+                            dir_cache_watcher.invalidate(&key).await;
+                        }
+                    }
+                }
+            }
+        });
+
+        tracing::info!("Filesystem watcher active for cache invalidation");
+    }
+
+    let thumb_cache_dir = std::path::PathBuf::from(&config.data_dir)
+        .join("cache")
+        .join("thumbs");
+    tokio::fs::create_dir_all(&thumb_cache_dir).await?;
+    let thumb_worker = rustyfile::services::thumbnail::ThumbWorker::new(
+        4, // max concurrent thumbnail generations
+        thumb_cache_dir,
+        300, // 300px max dimension
+    );
+
+    let hls_dir = std::path::PathBuf::from(&config.data_dir)
+        .join("cache")
+        .join("hls");
+    tokio::fs::create_dir_all(&hls_dir).await?;
+    let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
+    let hls_sources: Arc<dashmap::DashMap<String, std::path::PathBuf>> =
+        Arc::new(dashmap::DashMap::new());
     let login_limiter = Arc::new(LoginRateLimiter::new(
         10, // max 10 attempts
         std::time::Duration::from_secs(15 * 60), // per 15-minute window
@@ -55,7 +117,13 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret,
         canonical_root,
         login_limiter,
+        dir_cache,
+        thumb_worker,
+        transcoder,
+        hls_sources,
     };
+
+    api::tus::spawn_cleanup_task(state.db.clone(), state.config.cache_dir.clone());
 
     let app = api::build_router(state);
 

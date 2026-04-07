@@ -60,11 +60,25 @@ async fn browse(
         .map_err(|_| AppError::NotFound("Path not found".into()))?;
 
     if metadata.is_dir() {
-        let mut listing = file_ops::list_directory(
-            &state.canonical_root,
-            &resolved,
-            state.config.max_listing_items,
-        ).await?;
+        let root = state.canonical_root.clone();
+        let max_items = state.config.max_listing_items;
+        let resolved_clone = resolved.clone();
+
+        let cached = state.dir_cache.get_or_insert(cache_key, || async {
+            let listing = file_ops::list_directory(&root, &resolved_clone, max_items)
+                .await
+                .unwrap_or_else(|_| file_ops::DirListing {
+                    path: String::new(),
+                    items: Vec::new(),
+                    num_dirs: 0,
+                    num_files: 0,
+                    total: None,
+                    truncated: false,
+                });
+            std::sync::Arc::new(listing)
+        }).await;
+
+        let mut listing = (*cached).clone();
 
         let sort_field = query.sort.as_deref().unwrap_or("name");
         let ascending = query.order.as_deref().unwrap_or("asc") != "desc";
@@ -149,6 +163,11 @@ async fn save_file(
 
     file_ops::write_file(&resolved, &body).await?;
 
+    if let Some(parent) = resolved.parent() {
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
+    }
+
     Ok((
         StatusCode::OK,
         Json(MutationResponse {
@@ -173,6 +192,11 @@ async fn create(
 
     file_ops::create_directory(&resolved).await?;
 
+    if let Some(parent) = resolved.parent() {
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
+    }
+
     Ok((
         StatusCode::CREATED,
         Json(MutationResponse {
@@ -190,6 +214,11 @@ async fn remove(
 
     file_ops::delete(&resolved).await?;
 
+    if let Some(parent) = resolved.parent() {
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
+    }
+
     Ok(Json(MutationResponse {
         message: format!("Deleted: {user_path}"),
     }))
@@ -205,6 +234,15 @@ async fn rename_item(
     let to = file_ops::safe_resolve(&state.canonical_root, &body.destination)?;
 
     file_ops::rename(&from, &to, body.overwrite).await?;
+
+    if let Some(parent) = from.parent() {
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
+    }
+    if let Some(parent) = to.parent() {
+        let key = parent.to_string_lossy().into_owned();
+        state.dir_cache.invalidate(&key).await;
+    }
 
     Ok(Json(MutationResponse {
         message: format!("Renamed {user_path} -> {}", body.destination),

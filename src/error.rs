@@ -19,6 +19,12 @@ pub enum AppError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("Upload not found: {0}")]
+    UploadNotFound(String),
+
+    #[error("Upload offset mismatch")]
+    UploadConflict,
+
     #[error("Setup required")]
     SetupRequired,
 
@@ -52,6 +58,8 @@ impl IntoResponse for AppError {
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            AppError::UploadNotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            AppError::UploadConflict => (StatusCode::CONFLICT, "Upload offset mismatch".into()),
             AppError::SetupRequired => {
                 (StatusCode::PRECONDITION_REQUIRED, "Setup required".into())
             }

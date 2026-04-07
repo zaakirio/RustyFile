@@ -7,6 +7,9 @@ use dashmap::DashMap;
 use deadpool_sqlite::Pool;
 
 use crate::config::AppConfig;
+use crate::services::cache::DirCache;
+use crate::services::thumbnail::ThumbWorker;
+use crate::services::transcoder::HlsTranscoder;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -16,6 +19,14 @@ pub struct AppState {
     pub jwt_secret: Vec<u8>,
     pub canonical_root: PathBuf,
     pub login_limiter: Arc<LoginRateLimiter>,
+    /// In-memory directory listing cache (moka).
+    pub dir_cache: DirCache,
+    /// Semaphore-limited image thumbnail worker with disk cache.
+    pub thumb_worker: ThumbWorker,
+    /// On-demand HLS video transcoder backed by FFmpeg.
+    pub transcoder: HlsTranscoder,
+    /// Maps HLS source keys to their resolved filesystem paths.
+    pub hls_sources: Arc<DashMap<String, PathBuf>>,
 }
 
 pub struct LoginRateLimiter {

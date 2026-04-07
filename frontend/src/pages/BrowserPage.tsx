@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { Upload, FolderPlus, Refresh, Xmark, Check } from 'iconoir-react'
 import { useFiles } from '../hooks/useFiles'
+import { useTusUpload } from '../hooks/useTusUpload'
 import { useDragDrop } from '../hooks/useDragDrop'
 import { extractFsPath, encodeFsPath, isTextFile } from '../lib/paths'
 import type { FileEntry } from '../lib/types'
@@ -9,6 +10,7 @@ import Breadcrumbs from '../components/Breadcrumbs'
 import FileList from '../components/FileList'
 import DropZone from '../components/DropZone'
 import UploadFAB from '../components/UploadFAB'
+import UploadManager from '../components/UploadManager'
 
 export default function BrowserPage() {
   const location = useLocation()
@@ -18,8 +20,9 @@ export default function BrowserPage() {
   const currentPath = extractFsPath(location.pathname, '/browse/')
 
   const { listing, loading, error, refresh, deleteItem, createDir } = useFiles(currentPath)
-  const { isDragging, uploading, progress, errors, clearErrors, dragHandlers, uploadFromPicker } =
-    useDragDrop(currentPath, refresh)
+  const { items: uploadItems, addFiles, pauseUpload, resumeUpload, clearCompleted } =
+    useTusUpload({ currentPath, onAllComplete: refresh })
+  const { isDragging, dragHandlers, uploadFromPicker } = useDragDrop(addFiles)
 
   // Inline delete confirmation state
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
@@ -77,54 +80,8 @@ export default function BrowserPage() {
       {/* Drop zone overlay */}
       <DropZone visible={isDragging} targetPath={currentPath} />
 
-      {/* Upload progress indicator */}
-      {uploading && (
-        <div className="absolute top-0 left-0 right-0 z-40 bg-surface border-b border-borders px-4 py-3">
-          <p className="font-mono text-[12px] text-primary uppercase tracking-widest font-bold mb-2">
-            [ UPLOADING... ]
-          </p>
-          <div className="flex flex-col gap-1">
-            {progress.map((p) => (
-              <div
-                key={p.name}
-                className="font-mono text-[11px] tracking-wider flex items-center gap-2"
-              >
-                <span className={p.done ? 'text-primary' : 'text-muted'}>
-                  {p.done ? '[OK]' : '[..]'}
-                </span>
-                <span className={p.done ? 'text-text-main' : 'text-muted'}>
-                  {p.name}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Upload error feedback */}
-      {errors.length > 0 && (
-        <div className="bg-surface border-b border-borders px-4 py-3">
-          <div className="flex items-center justify-between mb-1">
-            <p className="font-mono text-[12px] text-primary uppercase tracking-widest font-bold">
-              [ UPLOAD FAILED ]
-            </p>
-            <button
-              onClick={clearErrors}
-              className="p-1 text-muted hover:text-primary transition-colors"
-              title="Dismiss"
-            >
-              <Xmark width={14} height={14} strokeWidth={2} />
-            </button>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            {errors.map((name) => (
-              <span key={name} className="font-mono text-[11px] text-muted tracking-wider">
-                {name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Upload manager */}
+      <UploadManager items={uploadItems} onPause={pauseUpload} onResume={resumeUpload} onClear={clearCompleted} />
 
       {/* Inline delete confirmation */}
       {pendingDelete && (

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use dashmap::DashMap;
 use reqwest::Client;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -37,6 +38,8 @@ impl TestApp {
             max_upload_bytes: 50 * 1024 * 1024,
             max_password_length: 128,
             max_listing_items: 10_000,
+            cache_dir: data_dir.path().join("cache").to_string_lossy().to_string(),
+            tus_expiry_hours: 24,
         };
 
         let pool = create_pool(&config).expect("Failed to create pool");
@@ -56,6 +59,19 @@ impl TestApp {
             std::time::Duration::from_secs(60),
         ));
 
+        let dir_cache = rustyfile::services::cache::DirCache::new(100, 30);
+
+        let thumb_cache_dir = data_dir.path().join("cache").join("thumbs");
+        std::fs::create_dir_all(&thumb_cache_dir).expect("Failed to create thumb cache dir");
+        let thumb_worker =
+            rustyfile::services::thumbnail::ThumbWorker::new(2, thumb_cache_dir, 300);
+
+        let hls_dir = data_dir.path().join("cache").join("hls");
+        std::fs::create_dir_all(&hls_dir).expect("Failed to create HLS cache dir");
+        let transcoder =
+            rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
+        let hls_sources: Arc<DashMap<String, std::path::PathBuf>> = Arc::new(DashMap::new());
+
         let state = AppState {
             db: pool,
             config,
@@ -63,6 +79,10 @@ impl TestApp {
             jwt_secret,
             canonical_root,
             login_limiter,
+            dir_cache,
+            thumb_worker,
+            transcoder,
+            hls_sources,
         };
 
         let app = build_router(state);

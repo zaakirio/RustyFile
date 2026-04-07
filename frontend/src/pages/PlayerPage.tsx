@@ -1,6 +1,5 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback } from 'react'
 import { useLocation, Link } from 'react-router'
-import { getToken } from '../api/client'
 import { encodeFsPath, extractFsPath } from '../lib/paths'
 import VideoControls from '../components/VideoControls'
 
@@ -13,7 +12,6 @@ export default function PlayerPage() {
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [controlsVisible, setControlsVisible] = useState(false)
-  const [videoUrl, setVideoUrl] = useState<string | null>(null)
 
   // Extract path from URL: /play/path/to/file.mp4 -> "path/to/file.mp4"
   const filePath = extractFsPath(location.pathname, '/play/')
@@ -28,28 +26,9 @@ export default function PlayerPage() {
   // Detect touch device for persistent controls
   const isTouchDevice = 'ontouchstart' in window
 
-  // MVP: Fetch video with auth headers and use blob URL.
-  // Production should use HttpOnly cookies set by the server.
-  useEffect(() => {
-    let revoke: string | null = null
-    const controller = new AbortController()
-
-    fetch(`/api/fs/download/${encodeFsPath(filePath)}?inline=true`, {
-      headers: { 'Authorization': `Bearer ${getToken() ?? ''}` },
-      signal: controller.signal,
-    })
-      .then(r => r.blob())
-      .then(blob => {
-        revoke = URL.createObjectURL(blob)
-        setVideoUrl(revoke)
-      })
-      .catch(() => {})
-
-    return () => {
-      controller.abort()
-      if (revoke) URL.revokeObjectURL(revoke)
-    }
-  }, [filePath])
+  // Direct URL — backend checks rustyfile_token cookie for auth,
+  // enabling HTTP Range requests for proper seeking/streaming.
+  const videoUrl = `/api/fs/download/${encodeFsPath(filePath)}?inline=true`
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current
@@ -131,28 +110,20 @@ export default function PlayerPage() {
           onClick={() => { if (isTouchDevice) setControlsVisible((v) => !v) }}
           onKeyDown={handleKeyDown}
         >
-          {videoUrl ? (
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              className="w-full h-full object-contain bg-black"
-              onClick={(e) => { if (!isTouchDevice) { e.stopPropagation(); togglePlay() } }}
-              onTimeUpdate={() =>
-                setCurrentTime(videoRef.current?.currentTime ?? 0)
-              }
-              onLoadedMetadata={() =>
-                setDuration(videoRef.current?.duration ?? 0)
-              }
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <span className="font-mono text-muted text-sm uppercase tracking-widest">
-                [ LOADING... ]
-              </span>
-            </div>
-          )}
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            className="w-full h-full object-contain bg-black"
+            onClick={(e) => { if (!isTouchDevice) { e.stopPropagation(); togglePlay() } }}
+            onTimeUpdate={() =>
+              setCurrentTime(videoRef.current?.currentTime ?? 0)
+            }
+            onLoadedMetadata={() =>
+              setDuration(videoRef.current?.duration ?? 0)
+            }
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+          />
 
           {/* Custom controls overlay */}
           <div
