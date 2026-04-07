@@ -21,5 +21,8 @@ config.toml
 *.swp
 *.swo
 
+# Node
+node_modules/
+
 # Environment
 .env
