@@ -197,14 +197,12 @@ export function useTusUpload({
       const map = internalRef.current
       const item = map.get(id)
       if (!item || item.status !== 'paused') return
-      item.status = 'uploading'
-      item.startedAt = Date.now()
-      item.bytesAtStart = (item.progress / 100) * item.size
-      activeCountRef.current++
+      item.status = 'queued'
+      item.speed = 0
       syncState()
-      item.tusUpload?.start()
+      processQueue()
     },
-    [syncState],
+    [syncState, processQueue],
   )
 
   const clearCompleted = useCallback(() => {
