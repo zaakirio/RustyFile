@@ -67,6 +67,15 @@ async fn main() -> anyhow::Result<()> {
         300, // 300px max dimension
     );
 
+    // 7d. Create HLS transcoder with disk cache
+    let hls_dir = std::path::PathBuf::from(&config.data_dir)
+        .join("cache")
+        .join("hls");
+    tokio::fs::create_dir_all(&hls_dir).await?;
+    let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
+    let hls_sources: Arc<dashmap::DashMap<String, std::path::PathBuf>> =
+        Arc::new(dashmap::DashMap::new());
+
     // 8. Build shared application state
     let login_limiter = Arc::new(LoginRateLimiter::new(
         10, // max 10 attempts
@@ -82,6 +91,8 @@ async fn main() -> anyhow::Result<()> {
         login_limiter,
         dir_cache,
         thumb_worker,
+        transcoder,
+        hls_sources,
     };
 
     // 8b. Spawn TUS expired-upload cleanup background task (every 5 min)

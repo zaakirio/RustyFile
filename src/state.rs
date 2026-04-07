@@ -9,6 +9,7 @@ use deadpool_sqlite::Pool;
 use crate::config::AppConfig;
 use crate::services::cache::DirCache;
 use crate::services::thumbnail::ThumbWorker;
+use crate::services::transcoder::HlsTranscoder;
 
 /// Shared application state passed to all handlers via Axum's State extractor.
 #[derive(Clone)]
@@ -25,6 +26,10 @@ pub struct AppState {
     pub dir_cache: DirCache,
     /// Semaphore-limited image thumbnail worker with disk cache.
     pub thumb_worker: ThumbWorker,
+    /// On-demand HLS video transcoder backed by FFmpeg.
+    pub transcoder: HlsTranscoder,
+    /// Maps HLS source keys to their resolved filesystem paths.
+    pub hls_sources: Arc<DashMap<String, PathBuf>>,
 }
 
 /// Simple sliding-window rate limiter for login attempts.

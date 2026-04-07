@@ -10,7 +10,7 @@ RUN cargo build --release
 
 # Stage 2: Runtime
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates && adduser -D -u 1000 rustyfile
+RUN apk add --no-cache ca-certificates ffmpeg && adduser -D -u 1000 rustyfile
 COPY --from=builder /app/target/release/rustyfile /usr/local/bin/rustyfile
 
 USER rustyfile

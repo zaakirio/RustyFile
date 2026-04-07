@@ -2,6 +2,7 @@ pub mod auth;
 pub mod download;
 pub mod files;
 pub mod health;
+pub mod hls;
 pub mod middleware;
 pub mod setup;
 pub mod thumbs;
@@ -66,6 +67,10 @@ pub fn build_router(state: AppState) -> Router {
     let thumb_routes = Router::new()
         .nest("/thumbs", thumbs::routes(state.clone()));
 
+    // HLS transcoding routes set their own Cache-Control.
+    let hls_routes = Router::new()
+        .nest("/hls", hls::routes(state.clone()));
+
     // Configurable CORS — defaults to Any but can be locked to specific origins.
     // Pattern from Portainer: restrict origins in production.
     let cors = build_cors_layer(&state.config.cors_origins);
@@ -112,6 +117,7 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api", tus_routes)
         .nest("/api", download_routes)
         .nest("/api", thumb_routes)
+        .nest("/api", hls_routes)
         .nest("/api", cached_api_routes)
         .layer(trace_layer)
         .layer(CompressionLayer::new())

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use dashmap::DashMap;
 use reqwest::Client;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -70,6 +71,12 @@ impl TestApp {
         let thumb_worker =
             rustyfile::services::thumbnail::ThumbWorker::new(2, thumb_cache_dir, 300);
 
+        let hls_dir = data_dir.path().join("cache").join("hls");
+        std::fs::create_dir_all(&hls_dir).expect("Failed to create HLS cache dir");
+        let transcoder =
+            rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
+        let hls_sources: Arc<DashMap<String, std::path::PathBuf>> = Arc::new(DashMap::new());
+
         let state = AppState {
             db: pool,
             config,
@@ -79,6 +86,8 @@ impl TestApp {
             login_limiter,
             dir_cache,
             thumb_worker,
+            transcoder,
+            hls_sources,
         };
 
         let app = build_router(state);
