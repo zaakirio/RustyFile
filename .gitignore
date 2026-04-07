@@ -1,5 +1,9 @@
 # Rust build artifacts
 /target/
+/Plans/
+ARCHITECTURE_*.md
+SPEC.md
+/docs/superpowers/
 
 # Runtime data
 /data/
