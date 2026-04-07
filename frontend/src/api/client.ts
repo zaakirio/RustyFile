@@ -1,0 +1,64 @@
+import type { ApiError } from '../lib/types'
+
+let token: string | null = localStorage.getItem('rustyfile_token')
+
+export function setToken(t: string | null) {
+  token = t
+  if (t) localStorage.setItem('rustyfile_token', t)
+  else localStorage.removeItem('rustyfile_token')
+}
+
+export function getToken() {
+  return token
+}
+
+export class ApiClientError extends Error {
+  status: number
+  code: string
+
+  constructor(status: number, code: string, message: string) {
+    super(message)
+    this.name = 'ApiClientError'
+    this.status = status
+    this.code = code
+  }
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  raw = false,
+): Promise<T> {
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (body && !raw) headers['Content-Type'] = 'application/json'
+  if (body && raw) headers['Content-Type'] = 'text/plain'
+
+  const res = await fetch(path, {
+    method,
+    headers,
+    body: body ? (raw ? (body as string) : JSON.stringify(body)) : undefined,
+  })
+
+  if (!res.ok) {
+    const err: ApiError = await res.json().catch(() => ({
+      error: res.statusText,
+    }))
+    throw new ApiClientError(res.status, err.code ?? 'UNKNOWN', err.error)
+  }
+
+  if (res.status === 204) return {} as T
+  const text = await res.text()
+  if (!text) return {} as T
+  return JSON.parse(text)
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>('GET', path),
+  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+  put: <T>(path: string, body?: unknown, raw = false) =>
+    request<T>('PUT', path, body, raw),
+  patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
+  delete: <T>(path: string) => request<T>('DELETE', path),
+}
