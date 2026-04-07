@@ -23,7 +23,7 @@ mod embedded {
         }
 
         match Assets::get(path) {
-            Some(file) => serve_file(path, &file.data),
+            Some(file) => serve_file(path, file.data),
             None => {
                 // No dot = SPA route -> serve index.html for client-side routing
                 // Has dot = actual missing asset -> 404
@@ -44,14 +44,14 @@ mod embedded {
                     (header::CONTENT_TYPE, "text/html; charset=utf-8"),
                     (header::CACHE_CONTROL, "no-cache"),
                 ],
-                file.data.to_vec(),
+                Vec::from(file.data),
             )
                 .into_response(),
             None => StatusCode::NOT_FOUND.into_response(),
         }
     }
 
-    fn serve_file(path: &str, data: &[u8]) -> Response {
+    fn serve_file(path: &str, data: std::borrow::Cow<'static, [u8]>) -> Response {
         let mime = mime_guess::from_path(path)
             .first_or_octet_stream()
             .to_string();
@@ -70,7 +70,7 @@ mod embedded {
                 (header::CONTENT_TYPE, mime.as_str()),
                 (header::CACHE_CONTROL, cache_control),
             ],
-            data.to_vec(),
+            Vec::from(data),
         )
             .into_response()
     }
