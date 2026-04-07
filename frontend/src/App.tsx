@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import LoginPage from './pages/LoginPage'
+import Layout from './components/Layout'
+import BrowserPage from './pages/BrowserPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -37,15 +39,38 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route
-        path="/browse/*"
         element={
           <RequireAuth>
-            <div className="flex items-center justify-center h-screen font-mono text-primary uppercase tracking-widest">
-              [ BROWSER // COMING SOON ]
-            </div>
+            <Layout />
           </RequireAuth>
         }
-      />
+      >
+        <Route path="/browse/*" element={<BrowserPage />} />
+        <Route
+          path="/edit/*"
+          element={
+            <div className="flex-1 flex items-center justify-center font-mono text-primary uppercase tracking-widest">
+              [ EDITOR // COMING SOON ]
+            </div>
+          }
+        />
+        <Route
+          path="/play/*"
+          element={
+            <div className="flex-1 flex items-center justify-center font-mono text-primary uppercase tracking-widest">
+              [ PLAYER // COMING SOON ]
+            </div>
+          }
+        />
+        <Route
+          path="/stash/*"
+          element={
+            <div className="flex-1 flex items-center justify-center font-mono text-primary uppercase tracking-widest">
+              [ STASH // COMING SOON ]
+            </div>
+          }
+        />
+      </Route>
       <Route
         path="*"
         element={
