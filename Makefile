@@ -1,4 +1,4 @@
-.PHONY: dev build test docker docker-run clean
+.PHONY: dev build test docker docker-run clean docker-multi
 
 dev:
 	cargo run -- --root ./test-data --data-dir ./tmp-data --port 3001
@@ -18,3 +18,6 @@ docker-run: docker
 clean:
 	cargo clean
 	rm -rf tmp-data rustyfile-data
+
+docker-multi:
+	docker buildx build --platform linux/amd64,linux/arm64 -t rustyfile:latest .

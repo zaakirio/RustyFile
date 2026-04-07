@@ -1,4 +1,4 @@
-# Stage 1: Build
+# Stage 1: Build Rust backend
 FROM rust:1.83-alpine AS builder
 RUN apk add --no-cache musl-dev
 WORKDIR /app
@@ -8,10 +8,19 @@ COPY src/ src/
 COPY migrations/ migrations/
 RUN cargo build --release
 
-# Stage 2: Runtime
+# Stage 2: Build frontend
+FROM node:22-alpine AS frontend
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+# Stage 3: Runtime
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates ffmpeg && adduser -D -u 1000 rustyfile
 COPY --from=builder /app/target/release/rustyfile /usr/local/bin/rustyfile
+COPY --from=frontend /app/dist /srv/frontend
 
 USER rustyfile
 ENV RUSTYFILE_HOST=0.0.0.0
