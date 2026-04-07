@@ -100,6 +100,7 @@ pub fn build_router(state: AppState) -> Router {
     let app = Router::new()
         .nest("/api", download_routes)
         .nest("/api", cached_api_routes)
+        .fallback(crate::frontend::static_handler)
         .layer(trace_layer)
         .layer(CompressionLayer::new())
         .layer(cors)
