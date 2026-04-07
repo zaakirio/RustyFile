@@ -1,0 +1,14 @@
+services:
+  rustyfile:
+    build: .
+    ports:
+      - "8080:80"
+    volumes:
+      - ./files:/data
+      - rustyfile_data:/config
+    environment:
+      - RUSTYFILE_LOG_LEVEL=info
+    restart: unless-stopped
+
+volumes:
+  rustyfile_data:

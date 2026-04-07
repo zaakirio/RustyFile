@@ -1,0 +1,8 @@
+target/
+tmp-data/
+rustyfile-data/
+test-data/
+*.db
+.git/
+docs/
+tests/
