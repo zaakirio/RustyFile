@@ -1,16 +1,31 @@
-# Stage 1: Build
-FROM rust:1.83-alpine AS builder
+# Stage 1: Build frontend
+FROM node:22-alpine AS frontend
+RUN npm install -g pnpm
+WORKDIR /app/frontend
+COPY frontend/pnpm-lock.yaml .
+RUN pnpm fetch --frozen-lockfile
+COPY frontend/package.json frontend/.npmrc ./
+RUN CI=true pnpm install --offline --frozen-lockfile
+COPY frontend/ .
+RUN pnpm run build
+
+# Stage 2: Build Rust binary
+FROM rust:1.88-alpine AS builder
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main(){}' > src/main.rs && cargo build --release 2>/dev/null ; rm -rf src
 COPY src/ src/
 COPY migrations/ migrations/
+COPY --from=frontend /app/frontend/dist frontend/dist
 RUN cargo build --release
 
-# Stage 2: Runtime
+# Stage 3: Runtime
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates && adduser -D -u 1000 rustyfile
+RUN apk add --no-cache ca-certificates \
+    && adduser -D -u 1000 rustyfile \
+    && mkdir -p /data /config \
+    && chown rustyfile:rustyfile /data /config
 COPY --from=builder /app/target/release/rustyfile /usr/local/bin/rustyfile
 
 USER rustyfile
