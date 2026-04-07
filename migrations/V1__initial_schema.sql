@@ -35,3 +35,9 @@ CREATE TABLE IF NOT EXISTS uploads (
     created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TRIGGER IF NOT EXISTS users_updated_at
+AFTER UPDATE ON users
+BEGIN
+    UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
