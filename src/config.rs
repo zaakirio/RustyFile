@@ -1,0 +1,173 @@
+use clap::Parser;
+use figment::providers::{Env, Format, Serialized, Toml};
+use figment::Figment;
+use serde::{Deserialize, Serialize};
+
+/// CLI arguments -- all optional so figment defaults can apply.
+#[derive(Debug, Parser)]
+#[command(name = "rustyfile", version, about = "Fast, self-hosted file browser")]
+struct CliArgs {
+    /// Host address to bind to
+    #[arg(long, env = "RUSTYFILE_HOST")]
+    host: Option<String>,
+
+    /// Port to listen on
+    #[arg(long, env = "RUSTYFILE_PORT")]
+    port: Option<u16>,
+
+    /// Root directory to serve files from
+    #[arg(long, env = "RUSTYFILE_ROOT")]
+    root: Option<String>,
+
+    /// Internal data directory (for database, etc.)
+    #[arg(long, env = "RUSTYFILE_DATA_DIR")]
+    data_dir: Option<String>,
+
+    /// Logging level
+    #[arg(long, env = "RUSTYFILE_LOG_LEVEL")]
+    log_level: Option<String>,
+
+    /// Log format: "pretty" or "json"
+    #[arg(long, env = "RUSTYFILE_LOG_FORMAT")]
+    log_format: Option<String>,
+
+    /// JWT token expiry in hours
+    #[arg(long, env = "RUSTYFILE_JWT_EXPIRY_HOURS")]
+    jwt_expiry_hours: Option<u64>,
+
+    /// Minimum password length
+    #[arg(long, env = "RUSTYFILE_MIN_PASSWORD_LENGTH")]
+    min_password_length: Option<usize>,
+
+    /// Setup wizard timeout in minutes
+    #[arg(long, env = "RUSTYFILE_SETUP_TIMEOUT_MINUTES")]
+    setup_timeout_minutes: Option<u64>,
+}
+
+/// Application configuration with all fields guaranteed to have values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    #[serde(default = "default_host")]
+    pub host: String,
+
+    #[serde(default = "default_port")]
+    pub port: u16,
+
+    #[serde(default = "default_root")]
+    pub root: String,
+
+    #[serde(default = "default_data_dir")]
+    pub data_dir: String,
+
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
+
+    #[serde(default = "default_log_format")]
+    pub log_format: String,
+
+    #[serde(default = "default_jwt_expiry_hours")]
+    pub jwt_expiry_hours: u64,
+
+    #[serde(default = "default_min_password_length")]
+    pub min_password_length: usize,
+
+    #[serde(default = "default_setup_timeout_minutes")]
+    pub setup_timeout_minutes: u64,
+}
+
+fn default_host() -> String {
+    "0.0.0.0".into()
+}
+fn default_port() -> u16 {
+    8080
+}
+fn default_root() -> String {
+    "./data".into()
+}
+fn default_data_dir() -> String {
+    "./rustyfile-data".into()
+}
+fn default_log_level() -> String {
+    "info".into()
+}
+fn default_log_format() -> String {
+    "pretty".into()
+}
+fn default_jwt_expiry_hours() -> u64 {
+    2
+}
+fn default_min_password_length() -> usize {
+    10
+}
+fn default_setup_timeout_minutes() -> u64 {
+    5
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            host: default_host(),
+            port: default_port(),
+            root: default_root(),
+            data_dir: default_data_dir(),
+            log_level: default_log_level(),
+            log_format: default_log_format(),
+            jwt_expiry_hours: default_jwt_expiry_hours(),
+            min_password_length: default_min_password_length(),
+            setup_timeout_minutes: default_setup_timeout_minutes(),
+        }
+    }
+}
+
+impl AppConfig {
+    /// Load configuration with layered precedence:
+    /// defaults < config.toml < RUSTYFILE_* env vars < CLI args
+    pub fn load() -> anyhow::Result<Self> {
+        let cli = CliArgs::parse();
+
+        let mut figment = Figment::new()
+            // Layer 1: compiled defaults
+            .merge(Serialized::defaults(AppConfig::default()))
+            // Layer 2: TOML config file (optional, non-fatal if missing)
+            .merge(Toml::file("config.toml").nested())
+            // Layer 3: environment variables with RUSTYFILE_ prefix
+            .merge(Env::prefixed("RUSTYFILE_").lowercase(false));
+
+        // Layer 4: CLI overrides (only set values that were actually provided)
+        if let Some(v) = &cli.host {
+            figment = figment.merge(Serialized::default("host", v));
+        }
+        if let Some(v) = cli.port {
+            figment = figment.merge(Serialized::default("port", v));
+        }
+        if let Some(v) = &cli.root {
+            figment = figment.merge(Serialized::default("root", v));
+        }
+        if let Some(v) = &cli.data_dir {
+            figment = figment.merge(Serialized::default("data_dir", v));
+        }
+        if let Some(v) = &cli.log_level {
+            figment = figment.merge(Serialized::default("log_level", v));
+        }
+        if let Some(v) = &cli.log_format {
+            figment = figment.merge(Serialized::default("log_format", v));
+        }
+        if let Some(v) = cli.jwt_expiry_hours {
+            figment = figment.merge(Serialized::default("jwt_expiry_hours", v));
+        }
+        if let Some(v) = cli.min_password_length {
+            figment = figment.merge(Serialized::default("min_password_length", v));
+        }
+        if let Some(v) = cli.setup_timeout_minutes {
+            figment = figment.merge(Serialized::default("setup_timeout_minutes", v));
+        }
+
+        let config: AppConfig = figment.extract()?;
+        Ok(config)
+    }
+
+    /// Return the database file path.
+    pub fn db_path(&self) -> std::path::PathBuf {
+        std::path::PathBuf::from(&self.data_dir).join("rustyfile.db")
+    }
+}

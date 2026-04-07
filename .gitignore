@@ -1,0 +1,21 @@
+# Rust build artifacts
+/target/
+
+# Runtime data
+/data/
+/rustyfile-data/
+
+# Config (user-specific)
+config.toml
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
