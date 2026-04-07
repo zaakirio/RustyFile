@@ -1,10 +1,12 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
-import BrowserPage from './pages/BrowserPage'
-import EditorPage from './pages/EditorPage'
-import PlayerPage from './pages/PlayerPage'
+
+const BrowserPage = lazy(() => import('./pages/BrowserPage'))
+const EditorPage = lazy(() => import('./pages/EditorPage'))
+const PlayerPage = lazy(() => import('./pages/PlayerPage'))
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -47,9 +49,9 @@ function AppRoutes() {
           </RequireAuth>
         }
       >
-        <Route path="/browse/*" element={<BrowserPage />} />
-        <Route path="/edit/*" element={<EditorPage />} />
-        <Route path="/play/*" element={<PlayerPage />} />
+        <Route path="/browse/*" element={<Suspense fallback={<LoadingScreen />}><BrowserPage /></Suspense>} />
+        <Route path="/edit/*" element={<Suspense fallback={<LoadingScreen />}><EditorPage /></Suspense>} />
+        <Route path="/play/*" element={<Suspense fallback={<LoadingScreen />}><PlayerPage /></Suspense>} />
         <Route
           path="/stash/*"
           element={

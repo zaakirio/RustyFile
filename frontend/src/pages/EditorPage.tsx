@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { api } from '../api/client'
+import { encodeFsPath, extractFsPath } from '../lib/paths'
 import type { FileInfo } from '../lib/types'
 
 function detectLanguage(ext: string | undefined): string {
@@ -31,9 +32,7 @@ export default function EditorPage() {
   const gutterRef = useRef<HTMLDivElement>(null)
 
   // Extract file path from URL: /edit/path/to/file.txt -> "path/to/file.txt"
-  const filePath = location.pathname
-    .replace(/^\/edit\/?/, '')
-    .replace(/\/$/, '')
+  const filePath = extractFsPath(location.pathname, '/edit/')
 
   const filename = filePath.split('/').pop() ?? ''
   const ext = getExtension(filename)
@@ -55,7 +54,7 @@ export default function EditorPage() {
       setLoading(true)
       setError(null)
       try {
-        const info = await api.get<FileInfo>(`/api/fs/${filePath}?content=true`)
+        const info = await api.get<FileInfo>(`/api/fs/${encodeFsPath(filePath)}?content=true`)
         if (!cancelled) {
           const text = info.content ?? ''
           setOriginalContent(text)
@@ -78,7 +77,7 @@ export default function EditorPage() {
     if (saving) return
     setSaving(true)
     try {
-      await api.put(`/api/fs/${filePath}`, content, true)
+      await api.put(`/api/fs/${encodeFsPath(filePath)}`, content, true)
       setOriginalContent(content)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save file')

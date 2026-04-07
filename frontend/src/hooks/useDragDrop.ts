@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, type DragEvent } from 'react'
 import { getToken } from '../api/client'
+import { encodeFsPath } from '../lib/paths'
 
 interface UploadProgress {
   name: string
@@ -18,6 +19,7 @@ export function useDragDrop(currentPath: string, onComplete: () => void) {
     uploading: false,
     progress: [],
   })
+  const [errors, setErrors] = useState<string[]>([])
 
   // Track drag counter with ref to handle nested element enter/leave events
   const dragCounter = useRef(0)
@@ -44,7 +46,7 @@ export function useDragDrop(currentPath: string, onComplete: () => void) {
     async (file: File) => {
       const dest = currentPath ? `${currentPath}/${file.name}` : file.name
       const token = getToken()
-      const res = await fetch(`/api/fs/${dest}`, {
+      const res = await fetch(`/api/fs/${encodeFsPath(dest)}`, {
         method: 'PUT',
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -68,6 +70,7 @@ export function useDragDrop(currentPath: string, onComplete: () => void) {
         done: false,
       }))
       setState({ isDragging: false, uploading: true, progress })
+      setErrors([])
 
       for (let i = 0; i < files.length; i++) {
         try {
@@ -76,6 +79,7 @@ export function useDragDrop(currentPath: string, onComplete: () => void) {
           setState((s) => ({ ...s, progress: [...progress] }))
         } catch (err) {
           console.error(`Upload failed: ${files[i].name}`, err)
+          setErrors((prev) => [...prev, files[i].name])
         }
       }
 
@@ -111,8 +115,12 @@ export function useDragDrop(currentPath: string, onComplete: () => void) {
     input.click()
   }, [processFiles])
 
+  const clearErrors = useCallback(() => setErrors([]), [])
+
   return {
     ...state,
+    errors,
+    clearErrors,
     dragHandlers: { onDragEnter, onDragLeave, onDragOver, onDrop },
     uploadFromPicker,
   }

@@ -4,14 +4,8 @@ let token: string | null = localStorage.getItem('rustyfile_token')
 
 export function setToken(t: string | null) {
   token = t
-  if (t) {
-    localStorage.setItem('rustyfile_token', t)
-    // Also set as cookie for <video>/<img> src that can't send Authorization headers
-    document.cookie = `rustyfile_token=${t}; path=/; SameSite=Strict`
-  } else {
-    localStorage.removeItem('rustyfile_token')
-    document.cookie = 'rustyfile_token=; path=/; max-age=0'
-  }
+  if (t) localStorage.setItem('rustyfile_token', t)
+  else localStorage.removeItem('rustyfile_token')
 }
 
 export function getToken() {

@@ -1,38 +1,34 @@
+import { useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { Upload, FolderPlus, Refresh } from 'iconoir-react'
+import { Upload, FolderPlus, Refresh, Xmark, Check } from 'iconoir-react'
 import { useFiles } from '../hooks/useFiles'
 import { useDragDrop } from '../hooks/useDragDrop'
+import { extractFsPath, encodeFsPath, isTextFile } from '../lib/paths'
 import type { FileEntry } from '../lib/types'
 import Breadcrumbs from '../components/Breadcrumbs'
 import FileList from '../components/FileList'
 import DropZone from '../components/DropZone'
 import UploadFAB from '../components/UploadFAB'
 
-function isTextFile(entry: FileEntry): boolean {
-  const mime = entry.mime_type ?? ''
-  if (mime.startsWith('text/')) return true
-  const textExts = [
-    'json', 'yaml', 'yml', 'toml', 'md', 'txt', 'rs', 'py',
-    'js', 'ts', 'jsx', 'tsx', 'html', 'htm', 'css', 'sh',
-    'go', 'xml', 'csv', 'sql', 'env', 'conf', 'cfg', 'ini', 'log',
-  ]
-  return textExts.includes(entry.extension?.toLowerCase() ?? '')
-}
-
 export default function BrowserPage() {
   const location = useLocation()
   const navigate = useNavigate()
 
   // Extract path from URL: /browse/path/to/dir -> "path/to/dir"
-  const currentPath = location.pathname
-    .replace(/^\/browse\/?/, '')
-    .replace(/\/$/, '')
+  const currentPath = extractFsPath(location.pathname, '/browse/')
 
-  const { listing, loading, error, refresh, deleteItem } = useFiles(currentPath)
-  const { isDragging, uploading, progress, dragHandlers, uploadFromPicker } =
+  const { listing, loading, error, refresh, deleteItem, createDir } = useFiles(currentPath)
+  const { isDragging, uploading, progress, errors, clearErrors, dragHandlers, uploadFromPicker } =
     useDragDrop(currentPath, refresh)
 
-  const handleNavigate = (entry: FileEntry) => {
+  // Inline delete confirmation state
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
+  // Inline new folder state
+  const [showNewFolder, setShowNewFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+
+  const handleNavigate = useCallback((entry: FileEntry) => {
     if (entry.is_dir) {
       navigate(`/browse/${entry.path}`)
     } else if (
@@ -44,15 +40,37 @@ export default function BrowserPage() {
       navigate(`/edit/${entry.path}`)
     } else {
       // Trigger download for other file types
-      window.open(`/api/fs/${entry.path}?download=true`, '_blank')
+      window.open(`/api/fs/${encodeFsPath(entry.path)}?download=true`, '_blank')
     }
-  }
+  }, [navigate])
 
-  const handleDelete = async (path: string) => {
-    if (window.confirm(`Delete "${path.split('/').pop()}"?`)) {
-      await deleteItem(path)
-    }
-  }
+  const handleDelete = useCallback((path: string) => {
+    setPendingDelete(path)
+  }, [])
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDelete) return
+    await deleteItem(pendingDelete)
+    setPendingDelete(null)
+  }, [pendingDelete, deleteItem])
+
+  const cancelDelete = useCallback(() => {
+    setPendingDelete(null)
+  }, [])
+
+  const handleCreateDir = useCallback(async () => {
+    const name = newFolderName.trim()
+    if (!name) return
+    const dirPath = currentPath ? `${currentPath}/${name}` : name
+    await createDir(dirPath)
+    setShowNewFolder(false)
+    setNewFolderName('')
+  }, [currentPath, newFolderName, createDir])
+
+  const cancelNewFolder = useCallback(() => {
+    setShowNewFolder(false)
+    setNewFolderName('')
+  }, [])
 
   return (
     <div className="relative flex-1 flex flex-col overflow-hidden" {...dragHandlers}>
@@ -83,6 +101,52 @@ export default function BrowserPage() {
         </div>
       )}
 
+      {/* Upload error feedback */}
+      {errors.length > 0 && (
+        <div className="bg-surface border-b border-borders px-4 py-3">
+          <div className="flex items-center justify-between mb-1">
+            <p className="font-mono text-[12px] text-primary uppercase tracking-widest font-bold">
+              [ UPLOAD FAILED ]
+            </p>
+            <button
+              onClick={clearErrors}
+              className="p-1 text-muted hover:text-primary transition-colors"
+              title="Dismiss"
+            >
+              <Xmark width={14} height={14} strokeWidth={2} />
+            </button>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            {errors.map((name) => (
+              <span key={name} className="font-mono text-[11px] text-muted tracking-wider">
+                {name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Inline delete confirmation */}
+      {pendingDelete && (
+        <div className="bg-surface border-b border-borders px-4 py-3 flex items-center gap-3">
+          <span className="font-mono text-[12px] text-primary uppercase tracking-widest font-bold">
+            DELETE {pendingDelete.split('/').pop()}?
+          </span>
+          <button
+            onClick={confirmDelete}
+            className="font-mono text-[12px] font-bold uppercase tracking-widest px-3 py-1 bg-primary text-background hover:opacity-80 transition-opacity"
+          >
+            YES
+          </button>
+          <button
+            onClick={cancelDelete}
+            className="font-mono text-[12px] font-bold uppercase tracking-widest px-3 py-1 border border-borders text-text-main hover:border-text-main transition-colors"
+          >
+            NO
+          </button>
+        </div>
+      )}
+
       {/* Header with breadcrumbs + action buttons */}
       <header className="h-14 border-b border-borders flex items-center px-4 md:px-6 shrink-0 gap-4">
         <Breadcrumbs
@@ -99,6 +163,7 @@ export default function BrowserPage() {
             <Refresh width={18} height={18} strokeWidth={1.8} />
           </button>
           <button
+            onClick={() => setShowNewFolder(true)}
             className="hidden md:flex p-2 text-muted hover:text-primary transition-colors"
             title="New folder"
           >
@@ -113,6 +178,41 @@ export default function BrowserPage() {
           </button>
         </div>
       </header>
+
+      {/* Inline new folder input */}
+      {showNewFolder && (
+        <div className="border-b border-borders px-4 md:px-6 py-2 flex items-center gap-2 bg-surface">
+          <span className="font-mono text-[12px] text-muted uppercase tracking-widest shrink-0">
+            NAME:
+          </span>
+          <input
+            type="text"
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleCreateDir()
+              if (e.key === 'Escape') cancelNewFolder()
+            }}
+            className="flex-1 h-8 bg-background border border-borders text-text-main font-mono text-[13px] px-3 rounded-none focus:border-primary focus:outline-none transition-colors"
+            placeholder="folder-name"
+            autoFocus
+          />
+          <button
+            onClick={handleCreateDir}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title="Create"
+          >
+            <Check width={16} height={16} strokeWidth={2} />
+          </button>
+          <button
+            onClick={cancelNewFolder}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title="Cancel"
+          >
+            <Xmark width={16} height={16} strokeWidth={2} />
+          </button>
+        </div>
+      )}
 
       {/* File listing */}
       <FileList

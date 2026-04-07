@@ -56,10 +56,11 @@ export default function LoginPage() {
 
         <div className="space-y-5">
           <div>
-            <label className="block font-mono text-[13px] text-muted uppercase tracking-wider mb-2">
+            <label htmlFor="username" className="block font-mono text-[13px] text-muted uppercase tracking-wider mb-2">
               USERNAME
             </label>
             <input
+              id="username"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -71,10 +72,11 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block font-mono text-[13px] text-muted uppercase tracking-wider mb-2">
+            <label htmlFor="password" className="block font-mono text-[13px] text-muted uppercase tracking-wider mb-2">
               PASSWORD
             </label>
             <input
+              id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

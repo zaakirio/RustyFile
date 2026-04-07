@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { Trash, Download, EditPencil } from 'iconoir-react'
 import type { FileEntry } from '../lib/types'
 import { formatSize, formatDate } from '../lib/format'
 import { getFileIcon } from '../lib/icons'
+import { isTextFile } from '../lib/paths'
+import { encodeFsPath } from '../lib/paths'
 
 interface FileRowProps {
   entry: FileEntry
@@ -10,14 +12,7 @@ interface FileRowProps {
   onDelete: (path: string) => void
 }
 
-function isTextFile(entry: FileEntry): boolean {
-  const mime = entry.mime_type ?? ''
-  if (mime.startsWith('text/')) return true
-  const textExts = ['json', 'yaml', 'yml', 'toml', 'md', 'txt', 'rs', 'py', 'js', 'ts', 'jsx', 'tsx', 'html', 'htm', 'css', 'sh', 'go', 'xml', 'csv', 'sql', 'env', 'conf', 'cfg', 'ini', 'log']
-  return textExts.includes(entry.extension?.toLowerCase() ?? '')
-}
-
-export default function FileRow({ entry, onItemClick, onDelete }: FileRowProps) {
+export default memo(function FileRow({ entry, onItemClick, onDelete }: FileRowProps) {
   const [hovered, setHovered] = useState(false)
   const Icon = getFileIcon(entry)
 
@@ -53,7 +48,10 @@ export default function FileRow({ entry, onItemClick, onDelete }: FileRowProps) 
         </span>
 
         {/* Modified */}
-        <span className="font-mono text-[12px] text-muted tracking-wider">
+        <span
+          className="font-mono text-[12px] text-muted tracking-wider"
+          title={entry.modified}
+        >
           {formatDate(entry.modified)}
         </span>
 
@@ -77,7 +75,7 @@ export default function FileRow({ entry, onItemClick, onDelete }: FileRowProps) 
           )}
           {!entry.is_dir && (
             <a
-              href={`/api/fs/${entry.path}?download=true`}
+              href={`/api/fs/${encodeFsPath(entry.path)}?download=true`}
               onClick={(e) => e.stopPropagation()}
               className="p-1.5 text-muted hover:text-primary transition-colors"
               title="Download"
@@ -120,11 +118,14 @@ export default function FileRow({ entry, onItemClick, onDelete }: FileRowProps) 
           <span className="font-mono text-[11px] text-muted uppercase tracking-wider">
             {entry.is_dir ? 'DIR' : formatSize(entry.size)}
           </span>
-          <span className="font-mono text-[10px] text-muted tracking-wider">
+          <span
+            className="font-mono text-[10px] text-muted tracking-wider"
+            title={entry.modified}
+          >
             {formatDate(entry.modified)}
           </span>
         </div>
       </div>
     </>
   )
-}
+})

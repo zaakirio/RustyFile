@@ -1,5 +1,7 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import { useLocation, Link } from 'react-router'
+import { getToken } from '../api/client'
+import { encodeFsPath, extractFsPath } from '../lib/paths'
 import VideoControls from '../components/VideoControls'
 
 export default function PlayerPage() {
@@ -11,11 +13,10 @@ export default function PlayerPage() {
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [controlsVisible, setControlsVisible] = useState(false)
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
 
   // Extract path from URL: /play/path/to/file.mp4 -> "path/to/file.mp4"
-  const filePath = location.pathname
-    .replace(/^\/play\/?/, '')
-    .replace(/\/$/, '')
+  const filePath = extractFsPath(location.pathname, '/play/')
 
   const fileName = filePath.split('/').pop() ?? 'Unknown'
 
@@ -24,7 +25,31 @@ export default function PlayerPage() {
   parentSegments.pop()
   const parentPath = parentSegments.join('/')
 
-  const videoSrc = `/api/fs/download/${encodeURIComponent(filePath)}?inline=true`
+  // Detect touch device for persistent controls
+  const isTouchDevice = 'ontouchstart' in window
+
+  // MVP: Fetch video with auth headers and use blob URL.
+  // Production should use HttpOnly cookies set by the server.
+  useEffect(() => {
+    let revoke: string | null = null
+    const controller = new AbortController()
+
+    fetch(`/api/fs/download/${encodeFsPath(filePath)}?inline=true`, {
+      headers: { 'Authorization': `Bearer ${getToken() ?? ''}` },
+      signal: controller.signal,
+    })
+      .then(r => r.blob())
+      .then(blob => {
+        revoke = URL.createObjectURL(blob)
+        setVideoUrl(revoke)
+      })
+      .catch(() => {})
+
+    return () => {
+      controller.abort()
+      if (revoke) URL.revokeObjectURL(revoke)
+    }
+  }, [filePath])
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current
@@ -52,6 +77,31 @@ export default function PlayerPage() {
     }
   }, [])
 
+  // Keyboard handler for container
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const video = videoRef.current
+    if (!video) return
+
+    switch (e.key) {
+      case ' ':
+        e.preventDefault()
+        togglePlay()
+        break
+      case 'ArrowLeft':
+        e.preventDefault()
+        video.currentTime = Math.max(0, video.currentTime - 5)
+        break
+      case 'ArrowRight':
+        e.preventDefault()
+        video.currentTime = Math.min(video.duration, video.currentTime + 5)
+        break
+      case 'f':
+        e.preventDefault()
+        handleToggleFullscreen()
+        break
+    }
+  }, [togglePlay, handleToggleFullscreen])
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -74,29 +124,40 @@ export default function PlayerPage() {
       <div className="flex-1 flex items-center justify-center bg-black p-0 md:p-6 overflow-hidden">
         <div
           ref={containerRef}
-          className="relative w-full md:w-[80vw] max-w-[1400px] aspect-video border-0 md:border md:border-borders"
+          tabIndex={0}
+          className="relative w-full md:w-[80vw] max-w-[1400px] aspect-video border-0 md:border md:border-borders outline-none"
           onMouseEnter={() => setControlsVisible(true)}
-          onMouseLeave={() => setControlsVisible(false)}
+          onMouseLeave={() => { if (!isTouchDevice) setControlsVisible(false) }}
+          onClick={() => { if (isTouchDevice) setControlsVisible((v) => !v) }}
+          onKeyDown={handleKeyDown}
         >
-          <video
-            ref={videoRef}
-            src={videoSrc}
-            className="w-full h-full object-contain bg-black"
-            onClick={togglePlay}
-            onTimeUpdate={() =>
-              setCurrentTime(videoRef.current?.currentTime ?? 0)
-            }
-            onLoadedMetadata={() =>
-              setDuration(videoRef.current?.duration ?? 0)
-            }
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-          />
+          {videoUrl ? (
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              className="w-full h-full object-contain bg-black"
+              onClick={(e) => { if (!isTouchDevice) { e.stopPropagation(); togglePlay() } }}
+              onTimeUpdate={() =>
+                setCurrentTime(videoRef.current?.currentTime ?? 0)
+              }
+              onLoadedMetadata={() =>
+                setDuration(videoRef.current?.duration ?? 0)
+              }
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <span className="font-mono text-muted text-sm uppercase tracking-widest">
+                [ LOADING... ]
+              </span>
+            </div>
+          )}
 
           {/* Custom controls overlay */}
           <div
             className={`absolute inset-0 transition-opacity duration-200 ${
-              controlsVisible ? 'opacity-100' : 'opacity-0'
+              controlsVisible || isTouchDevice ? 'opacity-100' : 'opacity-0'
             }`}
           >
             <VideoControls

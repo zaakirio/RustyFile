@@ -39,7 +39,7 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Storage meter */}
+      {/* TODO: wire to /api/system/info when available */}
       <div className="px-5 py-4 border-t border-borders">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2 text-muted">
@@ -48,15 +48,15 @@ export default function Sidebar() {
               STORAGE
             </span>
           </div>
-          <span className="font-mono text-[11px] text-primary uppercase tracking-wider">
-            64%
+          <span className="font-mono text-[11px] text-muted uppercase tracking-wider">
+            --%
           </span>
         </div>
         <div className="h-[1px] w-full bg-borders">
-          <div className="h-full bg-primary" style={{ width: '64%' }} />
+          <div className="h-full bg-primary" style={{ width: '0%' }} />
         </div>
         <p className="font-mono text-[10px] text-muted mt-1.5 tracking-wider">
-          128.4 GB / 200 GB
+          -- / --
         </p>
       </div>
     </div>
