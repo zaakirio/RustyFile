@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router'
 import { AuthProvider, useAuth } from './hooks/useAuth'
+import ErrorBoundary from './components/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
 
@@ -25,12 +26,14 @@ function LoadingScreen() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <div className="grain-overlay" />
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <div className="grain-overlay" />
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }
 

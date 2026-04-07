@@ -1,11 +1,12 @@
 import type { ApiError } from '../lib/types'
 
-let token: string | null = localStorage.getItem('rustyfile_token')
+// In-memory token for programmatic API calls (TUS uploads, etc.)
+// NOT persisted to localStorage. Session survives via HttpOnly cookie.
+let token: string | null = null
 
 export function setToken(t: string | null) {
   token = t
-  if (t) localStorage.setItem('rustyfile_token', t)
-  else localStorage.removeItem('rustyfile_token')
+  // No localStorage — the HttpOnly cookie handles persistence.
 }
 
 export function getToken() {

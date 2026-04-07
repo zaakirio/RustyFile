@@ -50,8 +50,13 @@ export default function BrowserPage() {
 
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete) return
-    await deleteItem(pendingDelete)
-    setPendingDelete(null)
+    try {
+      await deleteItem(pendingDelete)
+      setPendingDelete(null)
+    } catch (err) {
+      console.error('Delete failed:', err)
+      // Keep pendingDelete set so the user can retry
+    }
   }, [pendingDelete, deleteItem])
 
   const cancelDelete = useCallback(() => {
@@ -61,10 +66,15 @@ export default function BrowserPage() {
   const handleCreateDir = useCallback(async () => {
     const name = newFolderName.trim()
     if (!name) return
-    const dirPath = currentPath ? `${currentPath}/${name}` : name
-    await createDir(dirPath)
-    setShowNewFolder(false)
-    setNewFolderName('')
+    try {
+      const dirPath = currentPath ? `${currentPath}/${name}` : name
+      await createDir(dirPath)
+      setShowNewFolder(false)
+      setNewFolderName('')
+    } catch (err) {
+      console.error('Create directory failed:', err)
+      // Keep the dialog open so the user can retry
+    }
   }, [currentPath, newFolderName, createDir])
 
   const cancelNewFolder = useCallback(() => {

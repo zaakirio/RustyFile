@@ -6,7 +6,7 @@ import {
   useCallback,
 } from 'react'
 import type { ReactNode } from 'react'
-import { api, setToken, getToken } from '../api/client'
+import { api, setToken } from '../api/client'
 import type { User, AuthResponse, SetupStatus } from '../lib/types'
 
 interface AuthState {
@@ -30,7 +30,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const status = await api.get<SetupStatus>('/api/setup/status')
         setSetupRequired(status.setup_required)
-        if (!status.setup_required && getToken()) {
+        if (!status.setup_required) {
+          // Always attempt refresh — the HttpOnly cookie may hold a valid session
+          // even though the in-memory token is null after a page reload.
           try {
             const res = await api.post<AuthResponse>('/api/auth/refresh')
             setToken(res.token)
