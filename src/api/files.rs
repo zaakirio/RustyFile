@@ -74,27 +74,9 @@ async fn browse(
         .map_err(|_| AppError::NotFound("Path not found".into()))?;
 
     if metadata.is_dir() {
-        let cache_key = resolved.to_string_lossy().to_string();
         let root = state.canonical_root.clone();
         let max_items = state.config.max_listing_items;
-        let resolved_clone = resolved.clone();
-
-        let cached = state.dir_cache.get_or_insert(cache_key, || async {
-            let listing = file_ops::list_directory(&root, &resolved_clone, max_items)
-                .await
-                .unwrap_or_else(|_| file_ops::DirListing {
-                    path: String::new(),
-                    items: Vec::new(),
-                    num_dirs: 0,
-                    num_files: 0,
-                    total: None,
-                    truncated: false,
-                });
-            std::sync::Arc::new(listing)
-        }).await;
-
-        let mut listing = (*cached).clone();
-
+        let mut listing = file_ops::list_directory(&root, &resolved, max_items).await?;
         // Sort items: directories first, then by the requested field.
         let sort_field = query.sort.as_deref().unwrap_or("name");
         let ascending = query.order.as_deref().unwrap_or("asc") != "desc";
