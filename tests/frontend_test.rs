@@ -55,6 +55,33 @@ async fn spa_route_serves_index_html() {
 }
 
 #[tokio::test]
+async fn spa_route_with_dot_in_middle_segment_serves_index_html() {
+    let app = TestApp::spawn().await;
+
+    // Paths like /browse/v1.2/detail have a dot in a middle segment, not a
+    // file extension in the last segment.  They are SPA routes and must fall
+    // back to index.html rather than returning 404.
+    let resp = app
+        .client
+        .get(app.url("/browse/v1.2/detail"))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(resp.status(), 200);
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .expect("Missing content-type")
+        .to_str()
+        .unwrap();
+    assert!(
+        content_type.contains("text/html"),
+        "Expected text/html for SPA route with dot in middle segment, got {content_type}"
+    );
+}
+
+#[tokio::test]
 async fn missing_asset_returns_404() {
     let app = TestApp::spawn().await;
 

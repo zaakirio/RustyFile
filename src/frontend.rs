@@ -20,8 +20,12 @@ mod embedded {
         match Assets::get(path) {
             Some(file) => serve_file(path, file.data),
             None => {
-                // No dot = SPA route (serve index.html); dot = missing asset (404).
-                if path.contains('.') {
+                // Only treat the path as a missing static asset when the last
+                // segment carries a file extension (e.g. `app.js`).  Paths
+                // whose last segment has no extension—including those that
+                // contain dots in earlier segments like `/browse/v1.2/detail`
+                // —are SPA routes and should fall back to `index.html`.
+                if std::path::Path::new(path).extension().is_some() {
                     StatusCode::NOT_FOUND.into_response()
                 } else {
                     serve_index()
