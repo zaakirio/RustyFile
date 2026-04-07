@@ -11,15 +11,11 @@ use rustyfile::state::{AppState, LoginRateLimiter, SetupGuard};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 1. Load configuration (figment: defaults < TOML < env < CLI)
     let config = AppConfig::load()?;
-
-    // 2. Initialize logging
     init_logging(&config);
 
     tracing::info!("Starting RustyFile v{}", env!("CARGO_PKG_VERSION"));
 
-    // 3. Create required directories
     tokio::fs::create_dir_all(&config.root).await?;
     tokio::fs::create_dir_all(&config.data_dir).await?;
     // TUS upload temp directory
@@ -27,11 +23,9 @@ async fn main() -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&tus_upload_dir).await?;
     tracing::info!(root = %config.root, data_dir = %config.data_dir, cache_dir = %config.cache_dir, "Directories ensured");
 
-    // 4. Create database pool and run migrations
     let pool = db::create_pool(&config)?;
     db::run_migrations(&pool).await?;
 
-    // 5. Check if admin exists; if so, mark setup as complete
     let setup_guard = Arc::new(SetupGuard::new(config.setup_timeout_minutes));
     let admin_exists = db::user_repo::admin_exists(&pool).await?;
     if admin_exists {
@@ -44,16 +38,14 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // 6. Get or create JWT signing secret
     let jwt_secret = db::get_or_create_jwt_secret(&pool).await?;
 
-    // 7. Canonicalize root once at startup (avoids per-request syscall)
+    // Canonicalize once at startup to avoid per-request syscalls.
     let canonical_root = std::path::PathBuf::from(&config.root)
         .canonicalize()
         .expect("Root directory must exist and be accessible");
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
 
-    // 7b. Create directory listing cache (1000 entries, 30s TTL)
     let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
 
     // Spawn filesystem watcher for cache invalidation
@@ -96,7 +88,6 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Filesystem watcher active for cache invalidation");
     }
 
-    // 7c. Create thumbnail worker with disk cache
     let thumb_cache_dir = std::path::PathBuf::from(&config.data_dir)
         .join("cache")
         .join("thumbs");
@@ -107,7 +98,6 @@ async fn main() -> anyhow::Result<()> {
         300, // 300px max dimension
     );
 
-    // 7d. Create HLS transcoder with disk cache
     let hls_dir = std::path::PathBuf::from(&config.data_dir)
         .join("cache")
         .join("hls");
@@ -115,8 +105,6 @@ async fn main() -> anyhow::Result<()> {
     let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
     let hls_sources: Arc<dashmap::DashMap<String, std::path::PathBuf>> =
         Arc::new(dashmap::DashMap::new());
-
-    // 8. Build shared application state
     let login_limiter = Arc::new(LoginRateLimiter::new(
         10, // max 10 attempts
         std::time::Duration::from_secs(15 * 60), // per 15-minute window
@@ -135,13 +123,10 @@ async fn main() -> anyhow::Result<()> {
         hls_sources,
     };
 
-    // 8b. Spawn TUS expired-upload cleanup background task (every 5 min)
     api::tus::spawn_cleanup_task(state.db.clone(), state.config.cache_dir.clone());
 
-    // 9. Build the router
     let app = api::build_router(state);
 
-    // 10. Bind and serve with graceful shutdown
     let addr = format!("{}:{}", config.host, config.port);
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("Listening on http://{addr}");
@@ -154,7 +139,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Initialize tracing/logging based on config.
 fn init_logging(config: &AppConfig) {
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(&config.log_level));
@@ -174,7 +158,6 @@ fn init_logging(config: &AppConfig) {
     }
 }
 
-/// Wait for SIGINT (Ctrl+C) or SIGTERM for graceful shutdown.
 async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()

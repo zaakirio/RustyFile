@@ -3,7 +3,6 @@ use figment::providers::{Env, Format, Serialized, Toml};
 use figment::Figment;
 use serde::{Deserialize, Serialize};
 
-/// CLI arguments -- all optional so figment defaults can apply.
 #[derive(Debug, Parser)]
 #[command(name = "rustyfile", version, about = "Fast, self-hosted file browser")]
 struct CliArgs {
@@ -68,7 +67,6 @@ struct CliArgs {
     tus_expiry_hours: Option<u64>,
 }
 
-/// Application configuration with all fields guaranteed to have values.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default = "default_host")]
@@ -98,19 +96,16 @@ pub struct AppConfig {
     #[serde(default = "default_setup_timeout_minutes")]
     pub setup_timeout_minutes: u64,
 
-    /// Comma-separated list of allowed CORS origins, or "*" for any.
     #[serde(default = "default_cors_origins")]
     pub cors_origins: String,
 
-    /// Maximum upload body size in bytes (default 50 MB).
     #[serde(default = "default_max_upload_bytes")]
     pub max_upload_bytes: usize,
 
-    /// Maximum password length to prevent Argon2 DoS.
+    /// Max length prevents Argon2 DoS with extremely long passwords.
     #[serde(default = "default_max_password_length")]
     pub max_password_length: usize,
 
-    /// Maximum items returned in a directory listing.
     #[serde(default = "default_max_listing_items")]
     pub max_listing_items: usize,
 
@@ -192,20 +187,15 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    /// Load configuration with layered precedence:
-    /// defaults < config.toml < RUSTYFILE_* env vars < CLI args
+    /// Precedence: defaults < config.toml < RUSTYFILE_* env < CLI args
     pub fn load() -> anyhow::Result<Self> {
         let cli = CliArgs::parse();
 
         let mut figment = Figment::new()
-            // Layer 1: compiled defaults
             .merge(Serialized::defaults(AppConfig::default()))
-            // Layer 2: TOML config file (optional, non-fatal if missing)
             .merge(Toml::file("config.toml").nested())
-            // Layer 3: environment variables with RUSTYFILE_ prefix
             .merge(Env::prefixed("RUSTYFILE_").lowercase(false));
 
-        // Layer 4: CLI overrides (only set values that were actually provided)
         if let Some(v) = &cli.host {
             figment = figment.merge(Serialized::default("host", v));
         }
@@ -256,7 +246,6 @@ impl AppConfig {
         Ok(config)
     }
 
-    /// Return the database file path.
     pub fn db_path(&self) -> std::path::PathBuf {
         std::path::PathBuf::from(&self.data_dir).join("rustyfile.db")
     }

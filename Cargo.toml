@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 
+[features]
+default = ["embed-frontend"]
+embed-frontend = ["dep:rust-embed"]
+
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
@@ -38,6 +42,7 @@ base64 = "0.22"
 num_cpus = "1"
 futures-util = "0.3.32"
 http-body-util = "0.1"
+rust-embed = { version = "8", features = ["compression"], optional = true }
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }

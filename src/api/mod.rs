@@ -20,7 +20,6 @@ use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
 
-/// Extract client IP from proxy headers, with first hop from X-Forwarded-For.
 pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
     headers
         .get("x-forwarded-for")
@@ -36,46 +35,37 @@ pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-/// Build the complete application router with all routes and middleware layers.
 pub fn build_router(state: AppState) -> Router {
     let max_upload = state.config.max_upload_bytes;
 
-    // API routes that should carry Cache-Control: no-cache (mutable data).
     let cached_api_routes = Router::new()
         .nest("/health", health::routes())
         .nest("/setup", setup::routes())
         .nest("/auth", auth::routes())
         .nest("/fs", files::routes(state.clone()))
-        // Handle /fs/ with trailing slash (Axum nest doesn't match trailing slash)
+        // Axum nest doesn't match trailing slash.
         .route("/fs/", get(|| async { Redirect::permanent("/api/fs") }))
-        // API responses are mutable data -- never cache.
         .layer(SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
             HeaderValue::from_static("no-cache, no-store, must-revalidate"),
         ));
 
-    // Download routes set their own Cache-Control (private), so they are separate.
+    // Download routes set their own Cache-Control, so they're layered separately.
     let download_routes = Router::new()
         .nest("/fs/download", download::routes(state.clone()));
 
-    // TUS resumable upload routes -- no global body limit (TUS manages its own chunking).
     let tus_routes = Router::new()
         .nest("/tus", tus::routes(state.clone()))
         .layer(DefaultBodyLimit::disable());
 
-    // Thumbnail routes set their own Cache-Control (public, immutable).
     let thumb_routes = Router::new()
         .nest("/thumbs", thumbs::routes(state.clone()));
 
-    // HLS transcoding routes set their own Cache-Control.
     let hls_routes = Router::new()
         .nest("/hls", hls::routes(state.clone()));
 
-    // Configurable CORS — defaults to Any but can be locked to specific origins.
-    // Pattern from Portainer: restrict origins in production.
     let cors = build_cors_layer(&state.config.cors_origins);
 
-    // Include client IP in access log spans.
     let trace_layer = TraceLayer::new_for_http().make_span_with(
         |request: &axum::http::Request<_>| {
             let client_ip = extract_client_ip(request.headers());
@@ -88,8 +78,6 @@ pub fn build_router(state: AppState) -> Router {
         },
     );
 
-    // Security headers applied globally (pattern from Portainer's middleware).
-    // Prevents clickjacking, MIME sniffing, and restricts referrer leakage.
     let security_headers = |r: Router| {
         r.layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("x-frame-options"),
@@ -119,19 +107,16 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api", thumb_routes)
         .nest("/api", hls_routes)
         .nest("/api", cached_api_routes)
+        .fallback(crate::frontend::static_handler)
         .layer(trace_layer)
         .layer(CompressionLayer::new())
         .layer(cors)
-        // Global body size limit — configurable, defaults to 50 MB.
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state);
 
     security_headers(app)
 }
 
-/// Build CORS layer from a configuration string.
-///
-/// Supports "*" for any origin, or a comma-separated list of specific origins.
 fn build_cors_layer(origins_config: &str) -> CorsLayer {
     let base = CorsLayer::new()
         .allow_methods([
