@@ -22,7 +22,10 @@ async fn main() -> anyhow::Result<()> {
     // 3. Create required directories
     tokio::fs::create_dir_all(&config.root).await?;
     tokio::fs::create_dir_all(&config.data_dir).await?;
-    tracing::info!(root = %config.root, data_dir = %config.data_dir, "Directories ensured");
+    // TUS upload temp directory
+    let tus_upload_dir = std::path::PathBuf::from(&config.cache_dir).join("uploads");
+    tokio::fs::create_dir_all(&tus_upload_dir).await?;
+    tracing::info!(root = %config.root, data_dir = %config.data_dir, cache_dir = %config.cache_dir, "Directories ensured");
 
     // 4. Create database pool and run migrations
     let pool = db::create_pool(&config)?;
@@ -53,6 +56,17 @@ async fn main() -> anyhow::Result<()> {
     // 7b. Create directory listing cache (1000 entries, 30s TTL)
     let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
 
+    // 7c. Create thumbnail worker with disk cache
+    let thumb_cache_dir = std::path::PathBuf::from(&config.data_dir)
+        .join("cache")
+        .join("thumbs");
+    tokio::fs::create_dir_all(&thumb_cache_dir).await?;
+    let thumb_worker = rustyfile::services::thumbnail::ThumbWorker::new(
+        4, // max concurrent thumbnail generations
+        thumb_cache_dir,
+        300, // 300px max dimension
+    );
+
     // 8. Build shared application state
     let login_limiter = Arc::new(LoginRateLimiter::new(
         10, // max 10 attempts
@@ -67,7 +81,11 @@ async fn main() -> anyhow::Result<()> {
         canonical_root,
         login_limiter,
         dir_cache,
+        thumb_worker,
     };
+
+    // 8b. Spawn TUS expired-upload cleanup background task (every 5 min)
+    api::tus::spawn_cleanup_task(state.db.clone(), state.config.cache_dir.clone());
 
     // 9. Build the router
     let app = api::build_router(state);

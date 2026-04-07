@@ -42,6 +42,8 @@ impl TestApp {
             max_upload_bytes: 50 * 1024 * 1024,
             max_password_length: 128,
             max_listing_items: 10_000,
+            cache_dir: data_dir.path().join("cache").to_string_lossy().to_string(),
+            tus_expiry_hours: 24,
         };
 
         let pool = create_pool(&config).expect("Failed to create pool");
@@ -63,6 +65,11 @@ impl TestApp {
 
         let dir_cache = rustyfile::services::cache::DirCache::new(100, 30);
 
+        let thumb_cache_dir = data_dir.path().join("cache").join("thumbs");
+        std::fs::create_dir_all(&thumb_cache_dir).expect("Failed to create thumb cache dir");
+        let thumb_worker =
+            rustyfile::services::thumbnail::ThumbWorker::new(2, thumb_cache_dir, 300);
+
         let state = AppState {
             db: pool,
             config,
@@ -71,6 +78,7 @@ impl TestApp {
             canonical_root,
             login_limiter,
             dir_cache,
+            thumb_worker,
         };
 
         let app = build_router(state);

@@ -8,6 +8,7 @@ use deadpool_sqlite::Pool;
 
 use crate::config::AppConfig;
 use crate::services::cache::DirCache;
+use crate::services::thumbnail::ThumbWorker;
 
 /// Shared application state passed to all handlers via Axum's State extractor.
 #[derive(Clone)]
@@ -22,6 +23,8 @@ pub struct AppState {
     pub login_limiter: Arc<LoginRateLimiter>,
     /// In-memory directory listing cache (moka).
     pub dir_cache: DirCache,
+    /// Semaphore-limited image thumbnail worker with disk cache.
+    pub thumb_worker: ThumbWorker,
 }
 
 /// Simple sliding-window rate limiter for login attempts.

@@ -58,6 +58,11 @@ pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
             [],
         )?;
 
+        // V2: TUS resumable upload columns
+        conn.execute_batch(include_str!("../../migrations/V2__tus_and_cache.sql"))
+            .map_err(|e| tracing::warn!("V2 migration (may already be applied): {e}"))
+            .ok();
+
         Ok::<_, rusqlite::Error>(())
     })
     .await

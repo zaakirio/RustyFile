@@ -4,6 +4,8 @@ pub mod files;
 pub mod health;
 pub mod middleware;
 pub mod setup;
+pub mod thumbs;
+pub mod tus;
 
 use axum::extract::DefaultBodyLimit;
 use axum::http::{header, HeaderValue, Method};
@@ -55,6 +57,15 @@ pub fn build_router(state: AppState) -> Router {
     let download_routes = Router::new()
         .nest("/fs/download", download::routes(state.clone()));
 
+    // TUS resumable upload routes -- no global body limit (TUS manages its own chunking).
+    let tus_routes = Router::new()
+        .nest("/tus", tus::routes(state.clone()))
+        .layer(DefaultBodyLimit::disable());
+
+    // Thumbnail routes set their own Cache-Control (public, immutable).
+    let thumb_routes = Router::new()
+        .nest("/thumbs", thumbs::routes(state.clone()));
+
     // Configurable CORS — defaults to Any but can be locked to specific origins.
     // Pattern from Portainer: restrict origins in production.
     let cors = build_cors_layer(&state.config.cors_origins);
@@ -98,7 +109,9 @@ pub fn build_router(state: AppState) -> Router {
     };
 
     let app = Router::new()
+        .nest("/api", tus_routes)
         .nest("/api", download_routes)
+        .nest("/api", thumb_routes)
         .nest("/api", cached_api_routes)
         .layer(trace_layer)
         .layer(CompressionLayer::new())
@@ -129,6 +142,17 @@ fn build_cors_layer(origins_config: &str) -> CorsLayer {
             header::CONTENT_TYPE,
             header::RANGE,
             header::ACCEPT,
+            header::HeaderName::from_static("upload-offset"),
+            header::HeaderName::from_static("upload-length"),
+            header::HeaderName::from_static("upload-metadata"),
+            header::HeaderName::from_static("tus-resumable"),
+        ])
+        .expose_headers([
+            header::HeaderName::from_static("upload-offset"),
+            header::HeaderName::from_static("upload-length"),
+            header::HeaderName::from_static("tus-resumable"),
+            header::HeaderName::from_static("upload-expires"),
+            header::LOCATION,
         ]);
 
     let trimmed = origins_config.trim();

@@ -58,6 +58,14 @@ struct CliArgs {
     /// Maximum items in directory listing
     #[arg(long, env = "RUSTYFILE_MAX_LISTING_ITEMS")]
     max_listing_items: Option<usize>,
+
+    /// Cache directory for TUS temp files, thumbnails, etc.
+    #[arg(long, env = "RUSTYFILE_CACHE_DIR")]
+    cache_dir: Option<String>,
+
+    /// Hours before incomplete TUS uploads expire
+    #[arg(long, env = "RUSTYFILE_TUS_EXPIRY_HOURS")]
+    tus_expiry_hours: Option<u64>,
 }
 
 /// Application configuration with all fields guaranteed to have values.
@@ -105,6 +113,14 @@ pub struct AppConfig {
     /// Maximum items returned in a directory listing.
     #[serde(default = "default_max_listing_items")]
     pub max_listing_items: usize,
+
+    /// Directory for cache data (TUS temp files, thumbnails, etc.).
+    #[serde(default = "default_cache_dir")]
+    pub cache_dir: String,
+
+    /// Hours before incomplete TUS uploads expire and are cleaned up.
+    #[serde(default = "default_tus_expiry_hours")]
+    pub tus_expiry_hours: u64,
 }
 
 fn default_host() -> String {
@@ -146,6 +162,12 @@ fn default_max_password_length() -> usize {
 fn default_max_listing_items() -> usize {
     10_000
 }
+fn default_cache_dir() -> String {
+    "./rustyfile-data/cache".into()
+}
+fn default_tus_expiry_hours() -> u64 {
+    24
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -163,6 +185,8 @@ impl Default for AppConfig {
             max_upload_bytes: default_max_upload_bytes(),
             max_password_length: default_max_password_length(),
             max_listing_items: default_max_listing_items(),
+            cache_dir: default_cache_dir(),
+            tus_expiry_hours: default_tus_expiry_hours(),
         }
     }
 }
@@ -220,6 +244,12 @@ impl AppConfig {
         }
         if let Some(v) = cli.max_listing_items {
             figment = figment.merge(Serialized::default("max_listing_items", v));
+        }
+        if let Some(v) = &cli.cache_dir {
+            figment = figment.merge(Serialized::default("cache_dir", v));
+        }
+        if let Some(v) = cli.tus_expiry_hours {
+            figment = figment.merge(Serialized::default("tus_expiry_hours", v));
         }
 
         let config: AppConfig = figment.extract()?;
