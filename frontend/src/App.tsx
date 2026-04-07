@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
 import BrowserPage from './pages/BrowserPage'
 import EditorPage from './pages/EditorPage'
+import PlayerPage from './pages/PlayerPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -48,14 +49,7 @@ function AppRoutes() {
       >
         <Route path="/browse/*" element={<BrowserPage />} />
         <Route path="/edit/*" element={<EditorPage />} />
-        <Route
-          path="/play/*"
-          element={
-            <div className="flex-1 flex items-center justify-center font-mono text-primary uppercase tracking-widest">
-              [ PLAYER // COMING SOON ]
-            </div>
-          }
-        />
+        <Route path="/play/*" element={<PlayerPage />} />
         <Route
           path="/stash/*"
           element={
