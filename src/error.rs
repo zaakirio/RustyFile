@@ -19,6 +19,12 @@ pub enum AppError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("Upload not found: {0}")]
+    UploadNotFound(String),
+
+    #[error("Upload offset mismatch")]
+    UploadConflict,
+
     #[error("Setup required")]
     SetupRequired,
 
@@ -52,6 +58,8 @@ impl IntoResponse for AppError {
             Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             Self::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            Self::UploadNotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            Self::UploadConflict => (StatusCode::CONFLICT, "Upload offset mismatch".into()),
             Self::SetupRequired => (StatusCode::PRECONDITION_REQUIRED, "Setup required".into()),
             Self::SetupExpired => (StatusCode::GONE, "Setup window expired".into()),
             Self::TooManyRequests(msg) => {

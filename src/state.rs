@@ -10,6 +10,9 @@ use governor::state::keyed::DashMapStateStore;
 use governor::{Quota, RateLimiter};
 
 use crate::config::AppConfig;
+use crate::services::cache::DirCache;
+use crate::services::thumbnail::ThumbWorker;
+use crate::services::transcoder::HlsTranscoder;
 
 pub type LoginRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
 
@@ -37,6 +40,14 @@ pub struct AppState {
     pub login_limiter: Arc<LoginRateLimiter>,
     /// Pre-hashed dummy password for timing-attack-safe login failures.
     pub dummy_hash: String,
+    /// In-memory directory listing cache (moka).
+    pub dir_cache: DirCache,
+    /// Semaphore-limited image thumbnail worker with disk cache.
+    pub thumb_worker: ThumbWorker,
+    /// On-demand HLS video transcoder backed by FFmpeg.
+    pub transcoder: HlsTranscoder,
+    /// Maps HLS source keys to their resolved filesystem paths.
+    pub hls_sources: Arc<dashmap::DashMap<String, PathBuf>>,
 }
 
 /// Time-limited window for initial admin creation. Closes on admin creation

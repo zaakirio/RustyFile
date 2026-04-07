@@ -16,7 +16,7 @@ pub struct FileEntry {
     pub extension: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DirListing {
     pub path: String,
     pub items: Vec<FileEntry>,

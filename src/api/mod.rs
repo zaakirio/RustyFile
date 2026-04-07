@@ -2,8 +2,11 @@ pub mod auth;
 pub mod download;
 pub mod files;
 pub mod health;
+pub mod hls;
 pub mod middleware;
 pub mod setup;
+pub mod thumbs;
+pub mod tus;
 
 use std::time::Duration;
 
@@ -60,6 +63,16 @@ pub fn build_router(state: AppState) -> Router {
     // Download routes set their own Cache-Control, so they're layered separately.
     let download_routes = Router::new().nest("/fs/download", download::routes(state.clone()));
 
+    let tus_routes = Router::new()
+        .nest("/tus", tus::routes(state.clone()))
+        .layer(DefaultBodyLimit::disable());
+
+    let thumb_routes = Router::new()
+        .nest("/thumbs", thumbs::routes(state.clone()));
+
+    let hls_routes = Router::new()
+        .nest("/hls", hls::routes(state.clone()));
+
     let cors = build_cors_layer(&state.config.cors_origins);
 
     let trace_layer =
@@ -103,7 +116,10 @@ pub fn build_router(state: AppState) -> Router {
         .layer(TimeoutLayer::new(Duration::from_secs(30)));
 
     let app = Router::new()
+        .nest("/api", tus_routes)
         .nest("/api", download_routes)
+        .nest("/api", thumb_routes)
+        .nest("/api", hls_routes)
         .nest("/api", cached_api_routes)
         .fallback(crate::frontend::static_handler)
         .layer(trace_layer)
@@ -132,6 +148,17 @@ fn build_cors_layer(origins_config: &str) -> CorsLayer {
             header::CONTENT_TYPE,
             header::RANGE,
             header::ACCEPT,
+            header::HeaderName::from_static("upload-offset"),
+            header::HeaderName::from_static("upload-length"),
+            header::HeaderName::from_static("upload-metadata"),
+            header::HeaderName::from_static("tus-resumable"),
+        ])
+        .expose_headers([
+            header::HeaderName::from_static("upload-offset"),
+            header::HeaderName::from_static("upload-length"),
+            header::HeaderName::from_static("tus-resumable"),
+            header::HeaderName::from_static("upload-expires"),
+            header::LOCATION,
         ]);
 
     let trimmed = origins_config.trim();

@@ -74,12 +74,14 @@ pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
             )?;
         }
 
-        // Future migrations go here:
-        // if current_version < 2 {
-        //     tracing::info!("Applying migration V2: ...");
-        //     conn.execute_batch(include_str!("../../migrations/V2__....sql"))?;
-        //     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', 2)", [])?;
-        // }
+        if current_version < 2 {
+            tracing::info!("Applying migration V2: TUS and cache");
+            conn.execute_batch(include_str!("../../migrations/V2__tus_and_cache.sql"))?;
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', 2)",
+                [],
+            )?;
+        }
 
         Ok::<_, rusqlite::Error>(())
     })
