@@ -241,7 +241,7 @@ export default function EditorPage() {
         {/* Line number gutter */}
         <div
           ref={gutterRef}
-          className="w-12 bg-surface border-r border-borders overflow-hidden shrink-0 select-none"
+          className="w-12 bg-surface border-r border-borders overflow-y-auto shrink-0 select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           aria-hidden="true"
         >
           <div className="pt-4 pr-2">

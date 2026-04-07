@@ -1,13 +1,18 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate } from 'react-router'
+import { useNavigate, Navigate } from 'react-router'
 import { LogIn } from 'iconoir-react'
 import { useAuth } from '../hooks/useAuth'
 import { ApiClientError } from '../api/client'
 
 export default function LoginPage() {
-  const { setupRequired, login, setupAdmin } = useAuth()
+  const { user, setupRequired, login, setupAdmin } = useAuth()
   const navigate = useNavigate()
+
+  // Redirect already-authenticated users to browse
+  if (user && !setupRequired) {
+    return <Navigate to="/browse" replace />
+  }
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')

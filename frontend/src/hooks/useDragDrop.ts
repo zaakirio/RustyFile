@@ -108,9 +108,14 @@ export function useDragDrop(currentPath: string, onComplete: () => void) {
     const input = document.createElement('input')
     input.type = 'file'
     input.multiple = true
+    input.style.display = 'none'
+    document.body.appendChild(input)
     input.onchange = async () => {
       const files = Array.from(input.files ?? [])
-      await processFiles(files)
+      if (files.length > 0) {
+        await processFiles(files)
+      }
+      input.remove()
     }
     input.click()
   }, [processFiles])
