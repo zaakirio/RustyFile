@@ -61,6 +61,8 @@ impl TestApp {
             std::time::Duration::from_secs(60),
         ));
 
+        let dir_cache = rustyfile::services::cache::DirCache::new(100, 30);
+
         let state = AppState {
             db: pool,
             config,
@@ -68,6 +70,7 @@ impl TestApp {
             jwt_secret,
             canonical_root,
             login_limiter,
+            dir_cache,
         };
 
         let app = build_router(state);

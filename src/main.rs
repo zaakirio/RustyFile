@@ -50,6 +50,9 @@ async fn main() -> anyhow::Result<()> {
         .expect("Root directory must exist and be accessible");
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
 
+    // 7b. Create directory listing cache (1000 entries, 30s TTL)
+    let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
+
     // 8. Build shared application state
     let login_limiter = Arc::new(LoginRateLimiter::new(
         10, // max 10 attempts
@@ -63,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret,
         canonical_root,
         login_limiter,
+        dir_cache,
     };
 
     // 9. Build the router

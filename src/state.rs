@@ -7,6 +7,7 @@ use dashmap::DashMap;
 use deadpool_sqlite::Pool;
 
 use crate::config::AppConfig;
+use crate::services::cache::DirCache;
 
 /// Shared application state passed to all handlers via Axum's State extractor.
 #[derive(Clone)]
@@ -19,6 +20,8 @@ pub struct AppState {
     pub canonical_root: PathBuf,
     /// In-memory login rate limiter keyed by IP address.
     pub login_limiter: Arc<LoginRateLimiter>,
+    /// In-memory directory listing cache (moka).
+    pub dir_cache: DirCache,
 }
 
 /// Simple sliding-window rate limiter for login attempts.
