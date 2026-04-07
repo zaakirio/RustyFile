@@ -43,10 +43,10 @@ async function request<T>(
   })
 
   if (!res.ok) {
-    // On 401, clear token and redirect to login
     if (res.status === 401 && !path.includes('/auth/')) {
       setToken(null)
-      window.location.href = '/login'
+      // Trigger auth expiry event instead of hard redirect
+      window.dispatchEvent(new Event('rustyfile:auth-expired'))
     }
     const err: ApiError = await res.json().catch(() => ({
       error: res.statusText,

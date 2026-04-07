@@ -26,6 +26,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
 
   useEffect(() => {
+    const handleExpired = () => {
+      setToken(null)
+      setUser(null)
+    }
+    window.addEventListener('rustyfile:auth-expired', handleExpired)
+
     const init = async () => {
       try {
         const status = await api.get<SetupStatus>('/api/setup/status')
@@ -48,6 +54,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
     init()
+
+    return () => {
+      window.removeEventListener('rustyfile:auth-expired', handleExpired)
+    }
   }, [])
 
   const login = useCallback(

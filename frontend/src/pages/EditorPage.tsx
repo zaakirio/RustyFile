@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useLocation, useNavigate } from 'react-router'
+import { useLocation, useNavigate, useBlocker } from 'react-router'
 import { api } from '../api/client'
 import { encodeFsPath, extractFsPath } from '../lib/paths'
 import type { FileInfo } from '../lib/types'
@@ -46,6 +46,17 @@ export default function EditorPage() {
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 })
 
   const modified = content !== originalContent
+  const blocker = useBlocker(modified)
+
+  // Warn on browser navigation when modified
+  useEffect(() => {
+    if (!modified) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [modified])
 
   // Load file content on mount
   useEffect(() => {
@@ -148,6 +159,33 @@ export default function EditorPage() {
         >
           CLOSE
         </button>
+      </div>
+    )
+  }
+
+  // Navigation block confirmation
+  if (blocker.state === 'blocked') {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="font-mono text-center p-8 border border-borders bg-surface max-w-md">
+          <p className="text-text-main text-sm uppercase tracking-wider mb-6">
+            UNSAVED CHANGES WILL BE LOST
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => blocker.proceed()}
+              className="px-4 py-2 border border-borders text-muted hover:text-primary transition-colors font-mono text-sm uppercase tracking-wider"
+            >
+              [ DISCARD ]
+            </button>
+            <button
+              onClick={() => blocker.reset()}
+              className="px-4 py-2 bg-primary text-background font-mono text-sm uppercase tracking-wider"
+            >
+              [ KEEP EDITING ]
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
