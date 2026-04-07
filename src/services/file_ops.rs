@@ -59,19 +59,16 @@ pub fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, A
     // Build a clean relative path from only Normal components.
     let mut relative = PathBuf::new();
     for component in Path::new(user_path).components() {
-        match component {
-            Component::Normal(seg) => {
-                // Reject segment-level dangerous names.
-                let s = seg.to_string_lossy();
-                if s.starts_with('.') && s != "." {
-                    // Allow dotfiles but log them; reject pure ".." (already filtered).
-                }
-                relative.push(seg);
+        if let Component::Normal(seg) = component {
+            // Reject segment-level dangerous names.
+            let s = seg.to_string_lossy();
+            if s.starts_with('.') && s != "." {
+                // Allow dotfiles but log them; reject pure ".." (already filtered).
             }
-            // All other components (RootDir, CurDir, ParentDir, Prefix) are
-            // silently dropped to prevent directory-traversal attacks.
-            _ => {}
+            relative.push(seg);
         }
+        // All other components (RootDir, CurDir, ParentDir, Prefix) are
+        // silently dropped to prevent directory-traversal attacks.
     }
 
     let target = canonical_root.join(&relative);
