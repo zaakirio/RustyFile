@@ -149,7 +149,12 @@ async fn download(
     let last_modified = modified.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
     // Fix 5: Generate ETag from file size + last modified timestamp.
-    let etag = format!("\"{:x}-{:x}\"", file_size, modified.timestamp());
+    let etag = {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&file_size.to_le_bytes());
+        hasher.update(&modified.timestamp().to_le_bytes());
+        format!("\"{}\"", &hasher.finalize().to_hex()[..32])
+    };
 
     // Fix 5: Check If-None-Match -- return 304 if ETag matches.
     if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok())
