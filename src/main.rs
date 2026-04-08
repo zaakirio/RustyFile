@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 use rustyfile::api;
 use rustyfile::config::AppConfig;
 use rustyfile::db;
-use rustyfile::state::{AppState, LoginRateLimiter, SetupGuard};
+use rustyfile::state::{AppState, SetupGuard};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,6 +22,12 @@ async fn main() -> anyhow::Result<()> {
     let tus_upload_dir = std::path::PathBuf::from(&config.cache_dir).join("uploads");
     tokio::fs::create_dir_all(&tus_upload_dir).await?;
     tracing::info!(root = %config.root, data_dir = %config.data_dir, cache_dir = %config.cache_dir, "Directories ensured");
+
+    // Clean up orphaned temp files from interrupted writes without delaying startup.
+    let cleanup_root = config.root.clone();
+    tokio::spawn(async move {
+        cleanup_orphan_temp_files(&cleanup_root).await;
+    });
 
     let pool = db::create_pool(&config)?;
     db::run_migrations(&pool).await?;
@@ -45,6 +51,22 @@ async fn main() -> anyhow::Result<()> {
         .canonicalize()
         .expect("Root directory must exist and be accessible");
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
+
+    let login_limiter = rustyfile::state::new_login_limiter(
+        std::num::NonZeroU32::new(10).unwrap(),
+        15 * 60,
+    );
+
+    // Pre-hash a dummy password for constant-time login failure.
+    let dummy_hash = {
+        use argon2::password_hash::SaltString;
+        use argon2::PasswordHasher;
+        let salt = SaltString::generate(&mut rand::rngs::OsRng);
+        argon2::Argon2::default()
+            .hash_password(b"rustyfile_dummy_timing_password", &salt)
+            .expect("Failed to hash dummy password")
+            .to_string()
+    };
 
     let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
 
@@ -105,10 +127,6 @@ async fn main() -> anyhow::Result<()> {
     let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
     let hls_sources: Arc<dashmap::DashMap<String, std::path::PathBuf>> =
         Arc::new(dashmap::DashMap::new());
-    let login_limiter = Arc::new(LoginRateLimiter::new(
-        10, // max 10 attempts
-        std::time::Duration::from_secs(15 * 60), // per 15-minute window
-    ));
 
     let state = AppState {
         db: pool,
@@ -117,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret,
         canonical_root,
         login_limiter,
+        dummy_hash,
         dir_cache,
         thumb_worker,
         transcoder,
@@ -140,8 +159,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn init_logging(config: &AppConfig) {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&config.log_level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
 
     match config.log_format.as_str() {
         "json" => {
@@ -151,10 +170,36 @@ fn init_logging(config: &AppConfig) {
                 .init();
         }
         _ => {
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .init();
+            tracing_subscriber::fmt().with_env_filter(env_filter).init();
         }
+    }
+}
+
+async fn cleanup_orphan_temp_files(root: &str) {
+    use tokio::fs;
+    let root = std::path::Path::new(root);
+    let mut stack = vec![root.to_path_buf()];
+    let mut count = 0u32;
+
+    while let Some(dir) = stack.pop() {
+        let Ok(mut entries) = fs::read_dir(&dir).await else {
+            continue;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with(".rustyfile_tmp_") {
+                let _ = fs::remove_file(entry.path()).await;
+                count += 1;
+            } else if let Ok(ft) = entry.file_type().await {
+                if ft.is_dir() {
+                    stack.push(entry.path());
+                }
+            }
+        }
+    }
+    if count > 0 {
+        tracing::info!(count, "Cleaned up orphaned temp files");
     }
 }
 

@@ -11,8 +11,8 @@ embed-frontend = ["dep:rust-embed"]
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "compression-gzip", "compression-br", "trace", "set-header", "limit"] }
+tower = { version = "0.5", features = ["timeout"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "compression-br", "trace", "set-header", "limit", "timeout"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -32,6 +32,7 @@ mime_guess = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6"
+governor = "0.8"
 moka = { version = "0.12", features = ["future"] }
 blake3 = "1.8"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
@@ -55,3 +56,10 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+[lints.clippy]
+implicit_clone = "warn"
+use_self = "warn"
+format_push_string = "warn"
+manual_let_else = "warn"
+needless_pass_by_value = "warn"

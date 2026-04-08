@@ -60,6 +60,7 @@ async fn browse(
         .map_err(|_| AppError::NotFound("Path not found".into()))?;
 
     if metadata.is_dir() {
+        let cache_key = resolved.to_string_lossy().into_owned();
         let root = state.canonical_root.clone();
         let max_items = state.config.max_listing_items;
         let resolved_clone = resolved.clone();
@@ -101,10 +102,16 @@ async fn browse(
                 _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             };
 
-            if ascending { ord } else { ord.reverse() }
+            if ascending {
+                ord
+            } else {
+                ord.reverse()
+            }
         });
 
-        Ok(Json(serde_json::to_value(&listing).map_err(AppError::Json)?))
+        Ok(Json(
+            serde_json::to_value(&listing).map_err(AppError::Json)?,
+        ))
     } else {
         let entry = file_ops::file_info(&state.canonical_root, &resolved).await?;
 
@@ -138,7 +145,11 @@ async fn browse(
             .unwrap_or(false)
         {
             let subs = file_ops::detect_subtitles(resolved.clone()).await;
-            if subs.is_empty() { None } else { Some(subs) }
+            if subs.is_empty() {
+                None
+            } else {
+                Some(subs)
+            }
         } else {
             None
         };
@@ -149,7 +160,9 @@ async fn browse(
             subtitles,
         };
 
-        Ok(Json(serde_json::to_value(&response).map_err(AppError::Json)?))
+        Ok(Json(
+            serde_json::to_value(&response).map_err(AppError::Json)?,
+        ))
     }
 }
 
@@ -212,7 +225,7 @@ async fn remove(
 ) -> Result<Json<MutationResponse>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
-    file_ops::delete(&resolved).await?;
+    file_ops::delete(&state.canonical_root, &resolved).await?;
 
     if let Some(parent) = resolved.parent() {
         let key = parent.to_string_lossy().into_owned();

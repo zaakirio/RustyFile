@@ -12,9 +12,10 @@ export default function Sidebar() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="h-16 flex items-center px-5 border-b border-borders shrink-0">
+      <div className="h-16 flex items-center gap-3 px-5 border-b border-borders shrink-0">
+        <img src="/logo.png" alt="RustyFile" className="h-8 w-auto" />
         <h1 className="font-mono text-xl font-bold text-primary-container tracking-tighter uppercase">
-          SYS_DIR
+          RUSTYFILE
         </h1>
       </div>
 

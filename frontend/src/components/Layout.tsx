@@ -15,9 +15,12 @@ export default function Layout() {
       <main className="flex-1 flex flex-col h-screen overflow-hidden pb-20 md:pb-0">
         {/* Mobile header */}
         <header className="md:hidden h-16 flex items-center justify-between px-4 border-b border-borders bg-background shrink-0">
-          <h1 className="font-mono text-xl font-bold text-primary-container tracking-tighter uppercase">
-            RUSTYFILE
-          </h1>
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="RustyFile" className="h-7 w-auto" />
+            <h1 className="font-mono text-xl font-bold text-primary-container tracking-tighter uppercase">
+              RUSTYFILE
+            </h1>
+          </div>
           <button className="text-muted hover:text-primary transition-colors">
             <Settings width={22} height={22} strokeWidth={1.8} />
           </button>

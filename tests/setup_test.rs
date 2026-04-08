@@ -41,7 +41,10 @@ async fn create_admin_succeeds() {
 
     let json: serde_json::Value = resp.json().await.expect("Failed to parse admin response");
     assert!(json["token"].is_string(), "Response should contain a token");
-    assert!(json["user"].is_object(), "Response should contain a user object");
+    assert!(
+        json["user"].is_object(),
+        "Response should contain a user object"
+    );
     assert_eq!(json["user"]["username"], "admin");
     assert_eq!(json["user"]["role"], "admin");
 }

@@ -58,6 +58,10 @@ struct CliArgs {
     #[arg(long, env = "RUSTYFILE_MAX_LISTING_ITEMS")]
     max_listing_items: Option<usize>,
 
+    /// Trusted proxy IPs for X-Forwarded-For (comma-separated, empty = trust all)
+    #[arg(long, env = "RUSTYFILE_TRUSTED_PROXIES")]
+    trusted_proxies: Option<String>,
+
     /// Cache directory for TUS temp files, thumbnails, etc.
     #[arg(long, env = "RUSTYFILE_CACHE_DIR")]
     cache_dir: Option<String>,
@@ -109,6 +113,11 @@ pub struct AppConfig {
     #[serde(default = "default_max_listing_items")]
     pub max_listing_items: usize,
 
+    /// Comma-separated list of trusted proxy IPs for X-Forwarded-For.
+    /// Empty means trust all (development default).
+    #[serde(default = "default_trusted_proxies")]
+    pub trusted_proxies: String,
+
     /// Directory for cache data (TUS temp files, thumbnails, etc.).
     #[serde(default = "default_cache_dir")]
     pub cache_dir: String,
@@ -157,6 +166,9 @@ fn default_max_password_length() -> usize {
 fn default_max_listing_items() -> usize {
     10_000
 }
+fn default_trusted_proxies() -> String {
+    "".into() // Empty = trust all (backwards compatible)
+}
 fn default_cache_dir() -> String {
     "./rustyfile-data/cache".into()
 }
@@ -180,6 +192,7 @@ impl Default for AppConfig {
             max_upload_bytes: default_max_upload_bytes(),
             max_password_length: default_max_password_length(),
             max_listing_items: default_max_listing_items(),
+            trusted_proxies: default_trusted_proxies(),
             cache_dir: default_cache_dir(),
             tus_expiry_hours: default_tus_expiry_hours(),
         }
@@ -192,7 +205,7 @@ impl AppConfig {
         let cli = CliArgs::parse();
 
         let mut figment = Figment::new()
-            .merge(Serialized::defaults(AppConfig::default()))
+            .merge(Serialized::defaults(Self::default()))
             .merge(Toml::file("config.toml").nested())
             .merge(Env::prefixed("RUSTYFILE_").lowercase(false));
 
@@ -235,6 +248,9 @@ impl AppConfig {
         if let Some(v) = cli.max_listing_items {
             figment = figment.merge(Serialized::default("max_listing_items", v));
         }
+        if let Some(v) = &cli.trusted_proxies {
+            figment = figment.merge(Serialized::default("trusted_proxies", v));
+        }
         if let Some(v) = &cli.cache_dir {
             figment = figment.merge(Serialized::default("cache_dir", v));
         }
@@ -242,11 +258,27 @@ impl AppConfig {
             figment = figment.merge(Serialized::default("tus_expiry_hours", v));
         }
 
-        let config: AppConfig = figment.extract()?;
+        let config: Self = figment.extract()?;
         Ok(config)
     }
 
     pub fn db_path(&self) -> std::path::PathBuf {
         std::path::PathBuf::from(&self.data_dir).join("rustyfile.db")
+    }
+
+    /// Log warnings for security-sensitive configuration defaults.
+    /// Call once at startup after logging is initialized.
+    pub fn log_security_warnings(&self) {
+        if self.cors_origins.trim() == "*" || self.cors_origins.trim().is_empty() {
+            tracing::warn!(
+                "CORS allows all origins (*). Set RUSTYFILE_CORS_ORIGINS for production."
+            );
+        }
+        if self.trusted_proxies.trim().is_empty() {
+            tracing::warn!(
+                "X-Forwarded-For trusted from all sources. \
+                 Set RUSTYFILE_TRUSTED_PROXIES for production."
+            );
+        }
     }
 }

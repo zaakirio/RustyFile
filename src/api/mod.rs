@@ -8,11 +8,15 @@ pub mod setup;
 pub mod thumbs;
 pub mod tus;
 
+use std::time::Duration;
+
 use axum::extract::DefaultBodyLimit;
-use axum::http::{header, HeaderValue, Method};
-use axum::response::Redirect;
+use axum::http::{header, HeaderValue, Method, StatusCode};
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::get;
 use axum::Router;
+use tower::timeout::TimeoutLayer;
+use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -20,6 +24,12 @@ use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
 
+/// Extract client IP from proxy headers.
+///
+/// **Security note:** This trusts X-Forwarded-For unconditionally.
+/// In production, ensure a reverse proxy (nginx, Traefik) strips/sets
+/// this header from untrusted sources. Configure `RUSTYFILE_TRUSTED_PROXIES`
+/// if direct client access is possible.
 pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
     headers
         .get("x-forwarded-for")
@@ -51,8 +61,7 @@ pub fn build_router(state: AppState) -> Router {
         ));
 
     // Download routes set their own Cache-Control, so they're layered separately.
-    let download_routes = Router::new()
-        .nest("/fs/download", download::routes(state.clone()));
+    let download_routes = Router::new().nest("/fs/download", download::routes(state.clone()));
 
     let tus_routes = Router::new()
         .nest("/tus", tus::routes(state.clone()))
@@ -66,8 +75,8 @@ pub fn build_router(state: AppState) -> Router {
 
     let cors = build_cors_layer(&state.config.cors_origins);
 
-    let trace_layer = TraceLayer::new_for_http().make_span_with(
-        |request: &axum::http::Request<_>| {
+    let trace_layer =
+        TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
             let client_ip = extract_client_ip(request.headers());
             tracing::info_span!(
                 "request",
@@ -75,8 +84,7 @@ pub fn build_router(state: AppState) -> Router {
                 uri = %request.uri(),
                 client_ip = %client_ip,
             )
-        },
-    );
+        });
 
     let security_headers = |r: Router| {
         r.layer(SetResponseHeaderLayer::overriding(
@@ -101,6 +109,12 @@ pub fn build_router(state: AppState) -> Router {
         ))
     };
 
+    let timeout_layer = ServiceBuilder::new()
+        .layer(axum::error_handling::HandleErrorLayer::new(
+            |_: tower::BoxError| async { StatusCode::REQUEST_TIMEOUT.into_response() },
+        ))
+        .layer(TimeoutLayer::new(Duration::from_secs(30)));
+
     let app = Router::new()
         .nest("/api", tus_routes)
         .nest("/api", download_routes)
@@ -111,6 +125,7 @@ pub fn build_router(state: AppState) -> Router {
         .layer(trace_layer)
         .layer(CompressionLayer::new())
         .layer(cors)
+        .layer(timeout_layer)
         .layer(DefaultBodyLimit::max(max_upload))
         .with_state(state);
 

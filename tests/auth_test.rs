@@ -24,7 +24,10 @@ async fn login_with_valid_credentials() {
 
     let json: serde_json::Value = resp.json().await.expect("Failed to parse login response");
     assert!(json["token"].is_string(), "Response should contain a token");
-    assert!(json["user"].is_object(), "Response should contain a user object");
+    assert!(
+        json["user"].is_object(),
+        "Response should contain a user object"
+    );
     assert_eq!(json["user"]["username"], "admin");
 }
 
@@ -80,6 +83,8 @@ async fn refresh_returns_new_token() {
     assert_eq!(resp.status(), 200);
 
     let json: serde_json::Value = resp.json().await.expect("Failed to parse refresh response");
-    let new_token = json["token"].as_str().expect("Response should contain a token");
+    let new_token = json["token"]
+        .as_str()
+        .expect("Response should contain a token");
     assert!(!new_token.is_empty(), "New token should not be empty");
 }

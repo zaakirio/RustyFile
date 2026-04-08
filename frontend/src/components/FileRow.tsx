@@ -63,12 +63,14 @@ export default memo(function FileRow({ entry, onItemClick, onDelete }: FileRowPr
         >
           {!entry.is_dir && isTextFile(entry) && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation()
                 onItemClick(entry)
               }}
               className="p-1.5 text-muted hover:text-primary transition-colors"
               title="Edit"
+              aria-label={`Edit ${entry.name}`}
             >
               <EditPencil width={14} height={14} strokeWidth={2} />
             </button>
@@ -79,17 +81,20 @@ export default memo(function FileRow({ entry, onItemClick, onDelete }: FileRowPr
               onClick={(e) => e.stopPropagation()}
               className="p-1.5 text-muted hover:text-primary transition-colors"
               title="Download"
+              aria-label={`Download ${entry.name}`}
             >
               <Download width={14} height={14} strokeWidth={2} />
             </a>
           )}
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation()
               onDelete(entry.path)
             }}
             className="p-1.5 text-muted hover:text-primary transition-colors"
             title="Delete"
+            aria-label={`Delete ${entry.name}`}
           >
             <Trash width={14} height={14} strokeWidth={2} />
           </button>

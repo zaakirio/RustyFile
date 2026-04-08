@@ -23,3 +23,11 @@ min_password_length = 10
 
 # Setup wizard timeout (minutes)
 setup_timeout_minutes = 5
+
+# CORS origins (comma-separated, or "*" for any)
+# WARNING: "*" allows all origins — set explicit origins in production.
+# cors_origins = "https://example.com,https://app.example.com"
+
+# Trusted proxy IPs for X-Forwarded-For (comma-separated).
+# Empty = trust all (development default). Set to reverse proxy IPs in production.
+# trusted_proxies = "127.0.0.1,10.0.0.1"

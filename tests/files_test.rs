@@ -10,8 +10,7 @@ async fn list_root_directory() {
     // Seed the root directory with files and a subdirectory.
     app.write_file("hello.txt", b"hello world");
     app.write_file("data.json", b"{}");
-    std::fs::create_dir_all(app.root_dir.path().join("subdir"))
-        .expect("Failed to create subdir");
+    std::fs::create_dir_all(app.root_dir.path().join("subdir")).expect("Failed to create subdir");
 
     let resp = app
         .client

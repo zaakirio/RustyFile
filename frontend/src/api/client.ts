@@ -1,11 +1,12 @@
 import type { ApiError } from '../lib/types'
 
-let token: string | null = localStorage.getItem('rustyfile_token')
+// In-memory token for programmatic API calls (TUS uploads, etc.)
+// NOT persisted to localStorage. Session survives via HttpOnly cookie.
+let token: string | null = null
 
 export function setToken(t: string | null) {
   token = t
-  if (t) localStorage.setItem('rustyfile_token', t)
-  else localStorage.removeItem('rustyfile_token')
+  // No localStorage — the HttpOnly cookie handles persistence.
 }
 
 export function getToken() {
@@ -42,10 +43,10 @@ async function request<T>(
   })
 
   if (!res.ok) {
-    // On 401, clear token and redirect to login
     if (res.status === 401 && !path.includes('/auth/')) {
       setToken(null)
-      window.location.href = '/login'
+      // Trigger auth expiry event instead of hard redirect
+      window.dispatchEvent(new Event('rustyfile:auth-expired'))
     }
     const err: ApiError = await res.json().catch(() => ({
       error: res.statusText,

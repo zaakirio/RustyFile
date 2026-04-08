@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api/client'
 import { encodeFsPath } from '../lib/paths'
 import type { DirListing } from '../lib/types'
@@ -7,41 +7,30 @@ export function useFiles(path: string) {
   const [listing, setListing] = useState<DirListing | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
 
   const fetchListing = useCallback(async () => {
+    if (!mountedRef.current) return
     setLoading(true)
     setError(null)
     try {
       const res = await api.get<DirListing>(`/api/fs/${encodeFsPath(path)}`)
-      setListing(res)
+      if (mountedRef.current) setListing(res)
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Failed to load'
-      setError(message)
+      if (mountedRef.current) {
+        const message = e instanceof Error ? e.message : 'Failed to load'
+        setError(message)
+      }
     } finally {
-      setLoading(false)
+      if (mountedRef.current) setLoading(false)
     }
   }, [path])
 
   useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await api.get<DirListing>(`/api/fs/${encodeFsPath(path)}`)
-        if (!cancelled) setListing(res)
-      } catch (e: unknown) {
-        if (!cancelled) {
-          const message = e instanceof Error ? e.message : 'Failed to load'
-          setError(message)
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [path])
+    mountedRef.current = true
+    fetchListing()
+    return () => { mountedRef.current = false }
+  }, [fetchListing])
 
   const deleteItem = useCallback(
     async (itemPath: string) => {

@@ -36,7 +36,7 @@ async fn setup_status(State(state): State<AppState>) -> Json<SetupStatusResponse
 async fn create_admin(
     State(state): State<AppState>,
     Json(body): Json<CreateAdminRequest>,
-) -> Result<(StatusCode, Json<CreateAdminResponse>), AppError> {
+) -> Result<impl axum::response::IntoResponse, AppError> {
     if !state.setup_guard.is_setup_allowed() {
         if !state.setup_guard.is_setup_required() {
             return Err(AppError::Conflict("Admin account already exists".into()));
@@ -86,13 +86,9 @@ async fn create_admin(
     let password_hash = user_repo::hash_password(&body.password)?;
     let user = match user_repo::create_user(&state.db, username, &password_hash, "admin").await {
         Ok(user) => user,
-        Err(AppError::Database(ref e))
-            if e.to_string().contains("UNIQUE constraint failed") =>
-        {
+        Err(AppError::Database(ref e)) if e.to_string().contains("UNIQUE constraint failed") => {
             state.setup_guard.mark_complete();
-            return Err(AppError::Conflict(
-                "Username already taken".into(),
-            ));
+            return Err(AppError::Conflict("Username already taken".into()));
         }
         Err(e) => return Err(e),
     };
@@ -106,9 +102,19 @@ async fn create_admin(
         state.config.jwt_expiry_hours,
     )?;
 
+    let cookie = format!(
+        "rustyfile_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={}",
+        token,
+        state.config.jwt_expiry_hours * 3600
+    );
+
     Ok((
         StatusCode::CREATED,
-        Json(CreateAdminResponse { token, user }),
+        [(axum::http::header::SET_COOKIE, cookie)],
+        Json(CreateAdminResponse {
+            token: token.clone(),
+            user,
+        }),
     ))
 }
 

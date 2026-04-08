@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { DirListing, FileEntry } from '../lib/types'
 import FileRow from './FileRow'
 
@@ -47,10 +48,13 @@ export default function FileList({
   }
 
   // Sort: directories first, then files, both alphabetically
-  const sorted = [...listing.items].sort((a, b) => {
-    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
+  const sorted = useMemo(
+    () => [...listing.items].sort((a, b) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
+      return a.name.localeCompare(b.name)
+    }),
+    [listing.items]
+  )
 
   return (
     <div className="flex-1 overflow-y-auto">
