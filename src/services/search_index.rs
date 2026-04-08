@@ -27,6 +27,14 @@ fn default_limit() -> u32 {
     50
 }
 
+/// Escape SQLite LIKE metacharacters (`%`, `_`, `\`) so the string is treated
+/// as a literal substring / prefix.  Use together with `ESCAPE '\'`.
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SearchQuery {
     pub q: String,
@@ -267,7 +275,11 @@ impl SearchIndexer {
 
     pub async fn remove_prefix(&self, rel_prefix: &str) -> anyhow::Result<()> {
         let exact = rel_prefix.to_string();
-        let like_pattern = format!("{}/", rel_prefix);
+        // Escape metacharacters so directory names containing `%` or `_` are
+        // treated as literals.  The Rust string `{}/\\%` produces the SQL
+        // pattern `<escaped>/\%`, which with `ESCAPE '\'` matches only true
+        // children of the directory.
+        let like_pattern = format!("{}/\\%", escape_like(rel_prefix));
         let conn = self
             .db
             .get()
@@ -276,8 +288,8 @@ impl SearchIndexer {
 
         conn.interact(move |conn| {
             conn.execute(
-                "DELETE FROM file_index WHERE path = ?1 OR path LIKE ?2",
-                params![exact, format!("{}%", like_pattern)],
+                "DELETE FROM file_index WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\'",
+                params![exact, like_pattern],
             )?;
             Ok::<_, rusqlite::Error>(())
         })
@@ -294,6 +306,9 @@ impl SearchIndexer {
     pub async fn rename_prefix(&self, old: &str, new: &str) -> anyhow::Result<()> {
         let old = old.to_string();
         let new = new.to_string();
+        // Escape metacharacters so that directory names containing `%` or `_`
+        // are treated as literals when building the children LIKE pattern.
+        let escaped_old = escape_like(&old);
 
         let conn = self
             .db
@@ -314,14 +329,16 @@ impl SearchIndexer {
             )?;
 
             // Update children: replace the old prefix with new.
-            let children_pattern = format!("{}/", old);
+            // The Rust string `{}/\\%` produces the SQL pattern `<escaped>/\%`,
+            // which with `ESCAPE '\'` matches only true children of `old`.
+            let children_pattern = format!("{}/\\%", escaped_old);
             let old_prefix_len = old.len() as i64;
 
             conn.execute(
                 "UPDATE file_index \
                  SET path = ?1 || substr(path, ?2 + 1) \
-                 WHERE path LIKE ?3",
-                params![&new, old_prefix_len, format!("{}%", children_pattern)],
+                 WHERE path LIKE ?3 ESCAPE '\\'",
+                params![&new, old_prefix_len, children_pattern],
             )?;
 
             Ok::<_, rusqlite::Error>(())
@@ -347,13 +364,7 @@ impl SearchIndexer {
         let offset = query.offset;
         let q_text = query.q.clone();
 
-        fn escape_like_term(term: &str) -> String {
-            term.replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_")
-        }
-
-        let escaped_q = escape_like_term(&query.q);
+        let escaped_q = escape_like(&query.q);
 
         conn.interact(move |conn| {
             // Build dynamic WHERE conditions and parameter list.
