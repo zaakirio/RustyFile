@@ -385,6 +385,15 @@ async fn append_chunk(
         // Invalidate directory cache for the destination.
         let cache_key = dest_dir.to_string_lossy().to_string();
         state.dir_cache.invalidate(&cache_key).await;
+
+        // Update search index for the newly completed upload.
+        let indexer = state.search_indexer.clone();
+        let idx_path = if destination.is_empty() {
+            filename.clone()
+        } else {
+            format!("{}/{}", destination, filename)
+        };
+        tokio::spawn(async move { let _ = indexer.upsert(&idx_path).await; });
     }
 
     // Build response.

@@ -181,6 +181,10 @@ async fn save_file(
         state.dir_cache.invalidate(&key).await;
     }
 
+    let indexer = state.search_indexer.clone();
+    let idx_path = user_path.clone();
+    tokio::spawn(async move { let _ = indexer.upsert(&idx_path).await; });
+
     Ok((
         StatusCode::OK,
         Json(MutationResponse {
@@ -210,6 +214,10 @@ async fn create(
         state.dir_cache.invalidate(&key).await;
     }
 
+    let indexer = state.search_indexer.clone();
+    let idx_path = user_path.clone();
+    tokio::spawn(async move { let _ = indexer.upsert(&idx_path).await; });
+
     Ok((
         StatusCode::CREATED,
         Json(MutationResponse {
@@ -225,12 +233,25 @@ async fn remove(
 ) -> Result<Json<MutationResponse>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
+    // Check before delete so we know whether to remove a prefix or single entry.
+    let is_dir = tokio::fs::metadata(&resolved).await.map(|m| m.is_dir()).unwrap_or(false);
+
     file_ops::delete(&state.canonical_root, &resolved).await?;
 
     if let Some(parent) = resolved.parent() {
         let key = parent.to_string_lossy().into_owned();
         state.dir_cache.invalidate(&key).await;
     }
+
+    let indexer = state.search_indexer.clone();
+    let idx_path = user_path.clone();
+    tokio::spawn(async move {
+        if is_dir {
+            let _ = indexer.remove_prefix(&idx_path).await;
+        } else {
+            let _ = indexer.remove(&idx_path).await;
+        }
+    });
 
     Ok(Json(MutationResponse {
         message: format!("Deleted: {user_path}"),
@@ -256,6 +277,11 @@ async fn rename_item(
         let key = parent.to_string_lossy().into_owned();
         state.dir_cache.invalidate(&key).await;
     }
+
+    let indexer = state.search_indexer.clone();
+    let old_path = user_path.clone();
+    let new_path = body.destination.clone();
+    tokio::spawn(async move { let _ = indexer.rename_prefix(&old_path, &new_path).await; });
 
     Ok(Json(MutationResponse {
         message: format!("Renamed {user_path} -> {}", body.destination),
