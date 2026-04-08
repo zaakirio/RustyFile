@@ -13,6 +13,7 @@ interface FileRowProps {
   isSelected: boolean
   selectMode: boolean
   onToggleSelect: (path: string) => void
+  showFullPath?: boolean
 }
 
 export default memo(function FileRow({
@@ -22,6 +23,7 @@ export default memo(function FileRow({
   isSelected,
   selectMode,
   onToggleSelect,
+  showFullPath,
 }: FileRowProps) {
   const [hovered, setHovered] = useState(false)
   const Icon = getFileIcon(entry)
@@ -74,7 +76,7 @@ export default memo(function FileRow({
               entry.is_dir ? 'font-bold text-text-main' : 'text-text-main'
             }`}
           >
-            {entry.name}
+            {showFullPath ? entry.path : entry.name}
           </span>
         </div>
 
@@ -165,7 +167,7 @@ export default memo(function FileRow({
             entry.is_dir ? 'font-bold' : ''
           }`}
         >
-          {entry.name}
+          {showFullPath ? entry.path : entry.name}
         </span>
         <div className="flex flex-col items-end ml-2 shrink-0">
           <span className="font-mono text-[11px] text-muted uppercase tracking-wider">
