@@ -386,13 +386,16 @@ async fn append_chunk(
         let cache_key = dest_dir.to_string_lossy().to_string();
         state.dir_cache.invalidate(&cache_key).await;
 
-        // Update search index for the newly completed upload.
+        // Update search index for the newly completed upload using the
+        // resolved final path rather than raw user-provided path segments.
         let indexer = state.search_indexer.clone();
-        let idx_path = if destination.is_empty() {
-            filename.clone()
-        } else {
-            format!("{}/{}", destination, filename)
-        };
+        let idx_path = final_path
+            .strip_prefix(&state.canonical_root)
+            .map_err(|_| AppError::BadRequest("resolved upload path escaped root".into()))?
+            .iter()
+            .map(|component| component.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
         tokio::spawn(async move { let _ = indexer.upsert(&idx_path).await; });
     }
 
