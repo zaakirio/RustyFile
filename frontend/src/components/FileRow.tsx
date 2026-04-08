@@ -10,28 +10,64 @@ interface FileRowProps {
   entry: FileEntry
   onItemClick: (entry: FileEntry) => void
   onDelete: (path: string) => void
+  isSelected: boolean
+  selectMode: boolean
+  onToggleSelect: (path: string) => void
 }
 
-export default memo(function FileRow({ entry, onItemClick, onDelete }: FileRowProps) {
+export default memo(function FileRow({
+  entry,
+  onItemClick,
+  onDelete,
+  isSelected,
+  selectMode,
+  onToggleSelect,
+}: FileRowProps) {
   const [hovered, setHovered] = useState(false)
   const Icon = getFileIcon(entry)
+
+  const handleClick = () => {
+    if (selectMode) {
+      onToggleSelect(entry.path)
+    } else {
+      onItemClick(entry)
+    }
+  }
 
   return (
     <>
       {/* Desktop row */}
       <div
-        className="hidden md:grid grid-cols-[1fr_120px_150px_120px] items-center h-11 px-4 cursor-pointer transition-colors hover:bg-surface group relative"
+        className={`hidden md:grid grid-cols-[1fr_120px_150px_120px] items-center h-11 px-4 cursor-pointer transition-colors group relative ${
+          isSelected ? 'bg-primary/10' : 'hover:bg-surface'
+        }`}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        onClick={() => onItemClick(entry)}
+        onClick={handleClick}
       >
         {/* Name */}
         <div className="flex items-center gap-3 min-w-0">
+          {/* Checkbox: visible on hover or in select mode */}
+          <label
+            className={`shrink-0 flex items-center justify-center w-[18px] h-[18px] transition-opacity ${
+              selectMode || hovered ? 'opacity-100' : 'opacity-0'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => onToggleSelect(entry.path)}
+              className="w-3.5 h-3.5 accent-[var(--color-primary)] cursor-pointer"
+            />
+          </label>
           <Icon
             width={18}
             height={18}
             strokeWidth={1.8}
-            className={entry.is_dir ? 'text-primary shrink-0' : 'text-muted shrink-0'}
+            className={`${entry.is_dir ? 'text-primary' : 'text-muted'} shrink-0 ${
+              selectMode || hovered ? '' : '-ml-[30px]'
+            } transition-all`}
           />
           <span
             className={`truncate text-[14px] ${
@@ -55,10 +91,10 @@ export default memo(function FileRow({ entry, onItemClick, onDelete }: FileRowPr
           {formatDate(entry.modified)}
         </span>
 
-        {/* Quick actions (hover) */}
+        {/* Quick actions (hover, not in select mode) */}
         <div
           className={`flex items-center justify-end gap-1 transition-opacity ${
-            hovered ? 'opacity-100' : 'opacity-0'
+            hovered && !selectMode ? 'opacity-100' : 'opacity-0'
           }`}
         >
           {!entry.is_dir && isTextFile(entry) && (
@@ -77,7 +113,7 @@ export default memo(function FileRow({ entry, onItemClick, onDelete }: FileRowPr
           )}
           {!entry.is_dir && (
             <a
-              href={`/api/fs/${encodeFsPath(entry.path)}?download=true`}
+              href={`/api/fs/download/${encodeFsPath(entry.path)}`}
               onClick={(e) => e.stopPropagation()}
               className="p-1.5 text-muted hover:text-primary transition-colors"
               title="Download"
@@ -103,9 +139,21 @@ export default memo(function FileRow({ entry, onItemClick, onDelete }: FileRowPr
 
       {/* Mobile row */}
       <div
-        className="md:hidden flex items-center h-12 px-4 cursor-pointer active:bg-surface"
-        onClick={() => onItemClick(entry)}
+        className={`md:hidden flex items-center h-12 px-4 cursor-pointer ${
+          isSelected ? 'bg-primary/10' : 'active:bg-surface'
+        }`}
+        onClick={handleClick}
       >
+        {selectMode && (
+          <label className="shrink-0 mr-3" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => onToggleSelect(entry.path)}
+              className="w-4 h-4 accent-[var(--color-primary)] cursor-pointer"
+            />
+          </label>
+        )}
         <Icon
           width={20}
           height={20}

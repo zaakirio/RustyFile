@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to create filesystem watcher");
 
         debouncer
-            .watch(&watch_root, RecursiveMode::Recursive)
+            .watch(&watch_root, RecursiveMode::NonRecursive)
             .expect("Failed to watch root directory");
 
         tokio::spawn(async move {

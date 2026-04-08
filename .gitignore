@@ -5,6 +5,8 @@ ARCHITECTURE_*.md
 SPEC.md
 /docs/superpowers/
 /docs/
+/frontend/tmp-data/
+/tmp-data/
 # Runtime data
 /data/
 /rustyfile-data/

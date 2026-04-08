@@ -87,7 +87,7 @@ export function useTusUpload({
       syncState()
 
       const upload = new tus.Upload(item.file, {
-        endpoint: '/api/tus/',
+        endpoint: '/api/tus',
         retryDelays: [0, 1000, 3000, 5000, 10000],
         chunkSize: 5 * 1024 * 1024,
         metadata: {

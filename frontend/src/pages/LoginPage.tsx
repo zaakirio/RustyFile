@@ -52,10 +52,10 @@ export default function LoginPage() {
       >
         <div className="text-center mb-8">
           <h1 className="font-mono font-bold text-[32px] text-primary tracking-widest uppercase">
-            SYS_DIR
+            RUSTYFILE
           </h1>
           <p className="font-mono text-[13px] text-muted uppercase tracking-wider mt-1">
-            {isSetup ? 'INITIALIZE NODE' : 'SECURE GATEWAY'}
+            {isSetup ? 'CREATE ADMIN ACCOUNT' : 'SIGN IN'}
           </p>
         </div>
 
@@ -97,7 +97,7 @@ export default function LoginPage() {
             className="w-full h-12 bg-primary text-background font-mono font-bold text-[14px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_#F2F2F2] disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-none"
           >
             <LogIn width={18} height={18} strokeWidth={2} />
-            {isSetup ? 'INITIALIZE_NODE' : 'ACCESS_NODE'}
+            {isSetup ? 'CREATE ACCOUNT' : 'SIGN IN'}
           </button>
 
           {error && (

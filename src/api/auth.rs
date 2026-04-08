@@ -105,6 +105,7 @@ struct AuthResponse {
 #[derive(Debug, Serialize)]
 struct RefreshResponse {
     token: String,
+    user: user_repo::User,
 }
 
 #[derive(Debug, Serialize)]
@@ -205,7 +206,7 @@ async fn refresh(
         state.config.jwt_expiry_hours,
     )?;
 
-    Ok(Json(RefreshResponse { token: new_token }))
+    Ok(Json(RefreshResponse { token: new_token, user }))
 }
 
 pub fn routes() -> Router<AppState> {

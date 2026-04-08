@@ -1,10 +1,13 @@
 import { useRef, useState, useCallback } from 'react'
-import { useLocation, Link } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
+import { NavArrowLeft, NavArrowRight } from 'iconoir-react'
 import { encodeFsPath, extractFsPath } from '../lib/paths'
+import Breadcrumbs from '../components/Breadcrumbs'
 import VideoControls from '../components/VideoControls'
 
 export default function PlayerPage() {
   const location = useLocation()
+  const navigate = useNavigate()
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -83,20 +86,34 @@ export default function PlayerPage() {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <header className="h-14 flex items-center justify-between px-4 md:px-6 border-b border-borders bg-background shrink-0 z-50">
-        {/* Left: filename */}
-        <h2 className="font-display text-xl font-bold uppercase tracking-tight text-text-main truncate mr-4">
-          {fileName}
-        </h2>
-
-        {/* Right: return link */}
-        <Link
-          to={`/browse/${parentPath}`}
-          className="font-mono text-[14px] uppercase tracking-wider text-muted hover:text-primary transition-colors shrink-0"
+      {/* Header with navigation */}
+      <header className="h-14 border-b border-borders flex items-center px-4 md:px-6 shrink-0 gap-4 z-50">
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title="Back"
+          >
+            <NavArrowLeft width={18} height={18} strokeWidth={1.8} />
+          </button>
+          <button
+            onClick={() => navigate(1)}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title="Forward"
+          >
+            <NavArrowRight width={18} height={18} strokeWidth={1.8} />
+          </button>
+        </div>
+        <Breadcrumbs
+          path={filePath}
+          onNavigate={(p) => navigate(`/browse/${encodeFsPath(p)}`)}
+        />
+        <button
+          onClick={() => navigate(`/browse/${encodeFsPath(parentPath)}`)}
+          className="ml-auto font-mono text-[13px] font-bold uppercase tracking-widest px-3 py-1.5 bg-transparent border border-borders text-text-main hover:border-text-main transition-colors shrink-0"
         >
-          [ &lt;- ] RETURN
-        </Link>
+          CLOSE
+        </button>
       </header>
 
       {/* Video container */}
