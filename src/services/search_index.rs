@@ -180,7 +180,7 @@ impl SearchIndexer {
             } else {
                 abs_path
                     .extension()
-                    .map(|e| e.to_string_lossy().into_owned())
+                    .map(|e| e.to_string_lossy().to_lowercase())
             };
 
             let mime_type = if is_dir {
@@ -567,7 +567,7 @@ fn walk_dir_recursive(
             None
         } else {
             path.extension()
-                .map(|e| e.to_string_lossy().into_owned())
+                .map(|e| e.to_string_lossy().to_lowercase())
         };
 
         let mime_type = if is_dir {
