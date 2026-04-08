@@ -150,11 +150,14 @@ async fn login(
                 state.config.jwt_expiry_hours,
             )?;
 
-            let cookie = format!(
+            let mut cookie = format!(
                 "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
                 token,
                 state.config.jwt_expiry_hours * 3600
             );
+            if state.config.secure_cookie {
+                cookie.push_str("; Secure");
+            }
 
             Ok((
                 StatusCode::OK,
@@ -177,10 +180,14 @@ async fn login(
     }
 }
 
-async fn logout() -> impl axum::response::IntoResponse {
-    let clear_cookie = "rustyfile_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0";
+async fn logout(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let mut clear_cookie =
+        "rustyfile_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0".to_string();
+    if state.config.secure_cookie {
+        clear_cookie.push_str("; Secure");
+    }
     (
-        [(axum::http::header::SET_COOKIE, clear_cookie.to_string())],
+        [(axum::http::header::SET_COOKIE, clear_cookie)],
         Json(LogoutResponse {
             message: "Logged out".into(),
         }),
