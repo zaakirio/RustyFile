@@ -52,7 +52,10 @@ async fn main() -> anyhow::Result<()> {
         .expect("Root directory must exist and be accessible");
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
 
-    let login_limiter = rustyfile::state::new_login_limiter(10, 15 * 60);
+    let login_limiter = rustyfile::state::new_login_limiter(
+        std::num::NonZeroU32::new(10).unwrap(),
+        15 * 60,
+    );
 
     // Pre-hash a dummy password for constant-time login failure.
     let dummy_hash = {

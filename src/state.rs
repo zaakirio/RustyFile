@@ -17,15 +17,18 @@ use crate::services::transcoder::HlsTranscoder;
 pub type LoginRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
 
 /// Create a keyed rate limiter that allows `max_attempts` within `window_secs`.
-pub fn new_login_limiter(max_attempts: u32, window_secs: u64) -> Arc<LoginRateLimiter> {
+///
+/// Taking `NonZeroU32` for `max_attempts` makes zero an unrepresentable value,
+/// preventing a panic or divide-by-zero at runtime.
+pub fn new_login_limiter(max_attempts: NonZeroU32, window_secs: u64) -> Arc<LoginRateLimiter> {
     // Use milliseconds to avoid integer division truncating to zero when
     // window_secs < max_attempts (e.g. 60s / 100 attempts = 0s).
-    let period_ms = (window_secs * 1000) / max_attempts as u64;
+    let period_ms = (window_secs * 1000) / max_attempts.get() as u64;
     let period = Duration::from_millis(period_ms.max(1));
 
     let quota = Quota::with_period(period)
         .expect("Non-zero rate-limit period")
-        .allow_burst(NonZeroU32::new(max_attempts).expect("Non-zero max_attempts"));
+        .allow_burst(max_attempts);
 
     Arc::new(RateLimiter::dashmap(quota))
 }
