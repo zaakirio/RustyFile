@@ -4,6 +4,7 @@ pub mod files;
 pub mod health;
 pub mod hls;
 pub mod middleware;
+pub mod search;
 pub mod setup;
 pub mod thumbs;
 pub mod tus;
@@ -90,6 +91,7 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/health", health::routes())
         .nest("/setup", setup::routes())
         .nest("/auth", auth::routes())
+        .nest("/fs/search", search::routes(state.clone()))
         .nest("/fs", files::routes(state.clone()))
         // Axum nest doesn't match trailing slash.
         .route("/fs/", get(|| async { Redirect::permanent("/api/fs") }))
