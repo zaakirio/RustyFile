@@ -41,6 +41,7 @@ impl TestApp {
             trusted_proxies: "".into(),
             cache_dir: data_dir.path().join("cache").to_string_lossy().to_string(),
             tus_expiry_hours: 24,
+            secure_cookie: false,
         };
 
         let pool = create_pool(&config).expect("Failed to create pool");
@@ -57,7 +58,10 @@ impl TestApp {
             .canonicalize()
             .expect("Root temp dir must be canonicalizable");
 
-        let login_limiter = rustyfile::state::new_login_limiter(100, 60);
+        let login_limiter = rustyfile::state::new_login_limiter(
+            std::num::NonZeroU32::new(100).unwrap(),
+            60,
+        );
 
         let dummy_hash = {
             use argon2::password_hash::SaltString;
