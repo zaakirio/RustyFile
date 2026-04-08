@@ -23,8 +23,11 @@ async fn main() -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&tus_upload_dir).await?;
     tracing::info!(root = %config.root, data_dir = %config.data_dir, cache_dir = %config.cache_dir, "Directories ensured");
 
-    // Clean up orphaned temp files from interrupted writes.
-    cleanup_orphan_temp_files(&config.root).await;
+    // Clean up orphaned temp files from interrupted writes without delaying startup.
+    let cleanup_root = config.root.clone();
+    tokio::spawn(async move {
+        cleanup_orphan_temp_files(&cleanup_root).await;
+    });
 
     let pool = db::create_pool(&config)?;
     db::run_migrations(&pool).await?;
