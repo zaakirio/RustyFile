@@ -11,6 +11,7 @@ use governor::{Quota, RateLimiter};
 
 use crate::config::AppConfig;
 use crate::services::cache::DirCache;
+use crate::services::search_index::SearchIndexer;
 use crate::services::thumbnail::ThumbWorker;
 use crate::services::transcoder::HlsTranscoder;
 
@@ -51,6 +52,8 @@ pub struct AppState {
     pub transcoder: HlsTranscoder,
     /// Maps HLS source keys to their resolved filesystem paths.
     pub hls_sources: Arc<dashmap::DashMap<String, PathBuf>>,
+    /// Full-text search index backed by SQLite.
+    pub search_indexer: SearchIndexer,
 }
 
 /// Time-limited window for initial admin creation. Closes on admin creation
