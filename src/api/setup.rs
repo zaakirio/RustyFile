@@ -103,7 +103,7 @@ async fn create_admin(
     )?;
 
     let cookie = format!(
-        "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        "rustyfile_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={}",
         token,
         state.config.jwt_expiry_hours * 3600
     );
