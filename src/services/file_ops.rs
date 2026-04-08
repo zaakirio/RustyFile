@@ -28,6 +28,52 @@ pub struct DirListing {
     pub truncated: bool,
 }
 
+impl FileEntry {
+    /// Construct a FileEntry from a path and its metadata.
+    pub fn from_path_and_metadata(
+        canonical_root: &Path,
+        entry_path: &Path,
+        metadata: &std::fs::Metadata,
+    ) -> Self {
+        let is_dir = metadata.is_dir();
+        let size = if is_dir { 0 } else { metadata.len() };
+
+        let modified: DateTime<Utc> = metadata
+            .modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+            .into();
+
+        let name = entry_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        let rel_path = entry_path
+            .strip_prefix(canonical_root)
+            .unwrap_or(entry_path)
+            .to_string_lossy()
+            .into_owned();
+
+        let extension = if is_dir {
+            None
+        } else {
+            entry_path
+                .extension()
+                .map(|e| e.to_string_lossy().into_owned())
+        };
+
+        let mime_type = if is_dir {
+            None
+        } else {
+            mime_guess::from_path(entry_path)
+                .first()
+                .map(|m| m.to_string())
+        };
+
+        Self { name, path: rel_path, is_dir, size, modified, mime_type, extension }
+    }
+}
+
 /// Resolve user path safely within root. Rejects traversal attempts and
 /// null bytes. `canonical_root` must already be canonicalized.
 pub fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
@@ -105,47 +151,7 @@ pub async fn list_directory(
         let metadata = entry.metadata().await.map_err(AppError::Io)?;
         let entry_path = entry.path();
 
-        let rel_path = entry_path
-            .strip_prefix(canonical_root)
-            .unwrap_or(&entry_path)
-            .to_string_lossy()
-            .into_owned();
-
-        let is_dir = metadata.is_dir();
-        let size = if is_dir { 0 } else { metadata.len() };
-
-        let modified: DateTime<Utc> = metadata
-            .modified()
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-            .into();
-
-        let name = entry.file_name().to_string_lossy().into_owned();
-
-        let extension = if is_dir {
-            None
-        } else {
-            entry_path
-                .extension()
-                .map(|e| e.to_string_lossy().into_owned())
-        };
-
-        let mime_type = if is_dir {
-            None
-        } else {
-            mime_guess::from_path(&entry_path)
-                .first()
-                .map(|m| m.to_string())
-        };
-
-        items.push(FileEntry {
-            name,
-            path: rel_path,
-            is_dir,
-            size,
-            modified,
-            mime_type,
-            extension,
-        });
+        items.push(FileEntry::from_path_and_metadata(canonical_root, &entry_path, &metadata));
     }
 
     // num_dirs/num_files reflect only the returned (visible) entries.
@@ -173,57 +179,10 @@ pub async fn list_directory(
 
 pub async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
     let metadata = tokio::fs::metadata(file_path).await.map_err(|_| {
-        // Use relative path to avoid leaking server filesystem layout.
-        let rel = file_path
-            .strip_prefix(canonical_root)
-            .unwrap_or(Path::new("unknown"));
+        let rel = file_path.strip_prefix(canonical_root).unwrap_or(Path::new("unknown"));
         AppError::NotFound(format!("Not found: {}", rel.display()))
     })?;
-
-    let is_dir = metadata.is_dir();
-    let size = if is_dir { 0 } else { metadata.len() };
-
-    let modified: DateTime<Utc> = metadata
-        .modified()
-        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        .into();
-
-    let name = file_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    let rel_path = file_path
-        .strip_prefix(canonical_root)
-        .unwrap_or(file_path)
-        .to_string_lossy()
-        .to_string();
-
-    let extension = if is_dir {
-        None
-    } else {
-        file_path
-            .extension()
-            .map(|e| e.to_string_lossy().to_string())
-    };
-
-    let mime_type = if is_dir {
-        None
-    } else {
-        mime_guess::from_path(file_path)
-            .first()
-            .map(|m| m.to_string())
-    };
-
-    Ok(FileEntry {
-        name,
-        path: rel_path,
-        is_dir,
-        size,
-        modified,
-        mime_type,
-        extension,
-    })
+    Ok(FileEntry::from_path_and_metadata(canonical_root, file_path, &metadata))
 }
 
 pub async fn read_text_content(file_path: &Path) -> Result<String, AppError> {
