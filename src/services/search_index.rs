@@ -489,7 +489,7 @@ impl SearchIndexer {
                 },
             )?;
 
-            let results: Vec<FileEntry> = rows.filter_map(|r| r.ok()).collect();
+            let results: Vec<FileEntry> = rows.collect::<Result<Vec<_>, _>>()?;
 
             Ok::<_, rusqlite::Error>(SearchResults {
                 results,
