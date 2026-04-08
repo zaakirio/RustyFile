@@ -94,6 +94,15 @@ pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
             )?;
         }
 
+        if current_version < 3 {
+            tracing::info!("Applying migration V3: search index");
+            conn.execute_batch(include_str!("../../migrations/V3__search_index.sql"))?;
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', 3)",
+                [],
+            )?;
+        }
+
         Ok::<_, rusqlite::Error>(())
     })
     .await
