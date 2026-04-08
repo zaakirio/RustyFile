@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { Upload, FolderPlus, Refresh, Xmark, Check } from 'iconoir-react'
+import { Upload, FolderPlus, Refresh, Xmark, Check, NavArrowLeft, NavArrowRight, Trash } from 'iconoir-react'
 import { useFiles } from '../hooks/useFiles'
 import { useTusUpload } from '../hooks/useTusUpload'
 import { useDragDrop } from '../hooks/useDragDrop'
@@ -31,19 +31,61 @@ export default function BrowserPage() {
   const [showNewFolder, setShowNewFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
 
+  // Multi-select state
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  const toggleSelect = useCallback((path: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+      return next
+    })
+  }, [])
+
+  const selectAll = useCallback(() => {
+    if (!listing) return
+    setSelected(new Set(listing.items.map((i) => i.path)))
+  }, [listing])
+
+  const clearSelection = useCallback(() => {
+    setSelected(new Set())
+  }, [])
+
+  const bulkDelete = useCallback(async () => {
+    if (selected.size === 0) return
+    setBulkDeleting(true)
+    try {
+      for (const path of selected) {
+        await deleteItem(path)
+      }
+      setSelected(new Set())
+    } catch (err) {
+      console.error('Bulk delete failed:', err)
+    } finally {
+      setBulkDeleting(false)
+    }
+  }, [selected, deleteItem])
+
   const handleNavigate = useCallback((entry: FileEntry) => {
+    const encoded = encodeFsPath(entry.path)
     if (entry.is_dir) {
-      navigate(`/browse/${entry.path}`)
+      navigate(`/browse/${encoded}`)
     } else if (
       entry.mime_type?.startsWith('video/') ||
       entry.mime_type?.startsWith('audio/')
     ) {
-      navigate(`/play/${entry.path}`)
+      navigate(`/play/${encoded}`)
     } else if (isTextFile(entry)) {
-      navigate(`/edit/${entry.path}`)
+      navigate(`/edit/${encoded}`)
+    } else if (entry.mime_type?.startsWith('image/')) {
+      navigate(`/preview/${encoded}`)
     } else {
-      // Trigger download for other file types
-      window.open(`/api/fs/${encodeFsPath(entry.path)}?download=true`, '_blank')
+      window.open(`/api/fs/download/${encoded}`, '_blank')
     }
   }, [navigate])
 
@@ -58,7 +100,6 @@ export default function BrowserPage() {
       setPendingDelete(null)
     } catch (err) {
       console.error('Delete failed:', err)
-      // Keep pendingDelete set so the user can retry
     }
   }, [pendingDelete, deleteItem])
 
@@ -76,7 +117,6 @@ export default function BrowserPage() {
       setNewFolderName('')
     } catch (err) {
       console.error('Create directory failed:', err)
-      // Keep the dialog open so the user can retry
     }
   }, [currentPath, newFolderName, createDir])
 
@@ -114,11 +154,65 @@ export default function BrowserPage() {
         </div>
       )}
 
+      {/* Bulk selection bar */}
+      {selected.size > 0 && (
+        <div className="bg-surface border-b border-borders px-4 py-2.5 flex items-center gap-3">
+          <span className="font-mono text-[12px] text-text-main uppercase tracking-widest font-bold">
+            {selected.size} SELECTED
+          </span>
+          <button
+            onClick={selectAll}
+            className="font-mono text-[11px] uppercase tracking-widest px-2 py-0.5 text-muted hover:text-primary transition-colors"
+          >
+            ALL
+          </button>
+          <button
+            onClick={clearSelection}
+            className="font-mono text-[11px] uppercase tracking-widest px-2 py-0.5 text-muted hover:text-primary transition-colors"
+          >
+            NONE
+          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={bulkDelete}
+              disabled={bulkDeleting}
+              className="flex items-center gap-1.5 font-mono text-[12px] font-bold uppercase tracking-widest px-3 py-1 bg-primary text-background hover:opacity-80 transition-opacity disabled:opacity-50"
+            >
+              <Trash width={13} height={13} strokeWidth={2} />
+              {bulkDeleting ? 'DELETING...' : 'DELETE'}
+            </button>
+            <button
+              onClick={clearSelection}
+              className="p-1 text-muted hover:text-primary transition-colors"
+              title="Cancel selection"
+            >
+              <Xmark width={16} height={16} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header with breadcrumbs + action buttons */}
       <header className="h-14 border-b border-borders flex items-center px-4 md:px-6 shrink-0 gap-4">
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title="Back"
+          >
+            <NavArrowLeft width={18} height={18} strokeWidth={1.8} />
+          </button>
+          <button
+            onClick={() => navigate(1)}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title="Forward"
+          >
+            <NavArrowRight width={18} height={18} strokeWidth={1.8} />
+          </button>
+        </div>
         <Breadcrumbs
           path={currentPath}
-          onNavigate={(p) => navigate(`/browse/${p}`)}
+          onNavigate={(p) => navigate(`/browse/${encodeFsPath(p)}`)}
         />
 
         <div className="ml-auto flex items-center gap-2 shrink-0">
@@ -188,6 +282,8 @@ export default function BrowserPage() {
         error={error}
         onItemClick={handleNavigate}
         onDelete={handleDelete}
+        selected={selected}
+        onToggleSelect={toggleSelect}
       />
 
       {/* Mobile upload FAB */}

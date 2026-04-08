@@ -1,14 +1,25 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router'
-import { Folder, Home, Journal, Settings, HardDrive } from 'iconoir-react'
-
-const NAV_ITEMS = [
-  { to: '/browse', label: 'Root', icon: Folder },
-  { to: '/browse/home', label: 'Home', icon: Home },
-  { to: '/browse/var/log', label: 'Logs', icon: Journal },
-  { to: '/browse/etc', label: 'Config', icon: Settings },
-] as const
+import { Folder, HardDrive } from 'iconoir-react'
+import { api } from '../api/client'
+import type { DirListing } from '../lib/types'
 
 export default function Sidebar() {
+  const [dirs, setDirs] = useState<{ name: string; path: string }[]>([])
+
+  useEffect(() => {
+    api
+      .get<DirListing>('/api/fs')
+      .then((listing) => {
+        setDirs(
+          listing.items
+            .filter((i) => i.is_dir)
+            .map((i) => ({ name: i.name, path: i.path })),
+        )
+      })
+      .catch(() => {})
+  }, [])
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -21,11 +32,24 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+        <NavLink
+          to="/browse"
+          end
+          className={({ isActive }) =>
+            `flex items-center gap-3 h-10 px-3 font-mono text-[13px] uppercase tracking-wider transition-colors ${
+              isActive
+                ? 'text-primary bg-surface border border-borders'
+                : 'text-muted border border-transparent hover:bg-surface hover:border-borders'
+            }`
+          }
+        >
+          <Folder width={18} height={18} strokeWidth={1.8} />
+          Root
+        </NavLink>
+        {dirs.map((d) => (
           <NavLink
-            key={to}
-            to={to}
-            end={to === '/browse'}
+            key={d.path}
+            to={`/browse/${d.path}`}
             className={({ isActive }) =>
               `flex items-center gap-3 h-10 px-3 font-mono text-[13px] uppercase tracking-wider transition-colors ${
                 isActive
@@ -34,8 +58,8 @@ export default function Sidebar() {
               }`
             }
           >
-            <Icon width={18} height={18} strokeWidth={1.8} />
-            {label}
+            <Folder width={18} height={18} strokeWidth={1.8} />
+            {d.name}
           </NavLink>
         ))}
       </nav>

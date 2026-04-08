@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useLocation, useNavigate, useBlocker } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
+import { NavArrowLeft, NavArrowRight } from 'iconoir-react'
 import { api } from '../api/client'
 import { encodeFsPath, extractFsPath } from '../lib/paths'
+import Breadcrumbs from '../components/Breadcrumbs'
 import type { FileInfo } from '../lib/types'
 
 function detectLanguage(ext: string | undefined): string {
@@ -46,7 +48,6 @@ export default function EditorPage() {
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 })
 
   const modified = content !== originalContent
-  const blocker = useBlocker(modified)
 
   // Warn on browser navigation when modified
   useEffect(() => {
@@ -100,11 +101,12 @@ export default function EditorPage() {
 
   // Close handler - navigate to parent directory
   const handleClose = useCallback(() => {
+    if (modified && !window.confirm('You have unsaved changes. Discard them?')) return
     const parts = filePath.split('/')
     parts.pop()
-    const parentDir = parts.join('/')
+    const parentDir = encodeFsPath(parts.join('/'))
     navigate(`/browse/${parentDir}`)
-  }, [filePath, navigate])
+  }, [filePath, navigate, modified])
 
   // Keyboard shortcut: Ctrl/Cmd+S to save
   useEffect(() => {
@@ -164,58 +166,40 @@ export default function EditorPage() {
     )
   }
 
-  // Navigation block confirmation
-  if (blocker.state === 'blocked') {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="font-mono text-center p-8 border border-borders bg-surface max-w-md">
-          <p className="text-text-main text-sm uppercase tracking-wider mb-6">
-            UNSAVED CHANGES WILL BE LOST
-          </p>
-          <div className="flex gap-3 justify-center">
-            <button
-              onClick={() => blocker.proceed()}
-              className="px-4 py-2 border border-borders text-muted hover:text-primary transition-colors font-mono text-sm uppercase tracking-wider"
-            >
-              [ DISCARD ]
-            </button>
-            <button
-              onClick={() => blocker.reset()}
-              className="px-4 py-2 bg-primary text-background font-mono text-sm uppercase tracking-wider"
-            >
-              [ KEEP EDITING ]
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="h-12 bg-surface border-b border-borders flex items-center px-4 shrink-0 gap-4">
-        {/* Left: file icon + filename */}
-        <div className="flex items-center gap-2 min-w-0">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            className="shrink-0 text-muted"
+      {/* Navigation header */}
+      <header className="h-14 border-b border-borders flex items-center px-4 md:px-6 shrink-0 gap-4">
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => {
+              if (modified && !window.confirm('You have unsaved changes. Discard them?')) return
+              navigate(-1)
+            }}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title="Back"
           >
-            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" />
-            <polyline points="14,2 14,8 20,8" />
-          </svg>
-          <span className="font-mono font-bold text-[13px] text-text-main truncate">
-            {filename}{modified ? '*' : ''}
-          </span>
+            <NavArrowLeft width={18} height={18} strokeWidth={1.8} />
+          </button>
+          <button
+            onClick={() => navigate(1)}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title="Forward"
+          >
+            <NavArrowRight width={18} height={18} strokeWidth={1.8} />
+          </button>
         </div>
-
-        {/* Right: Save + Close buttons */}
+        <Breadcrumbs
+          path={filePath}
+          onNavigate={(p) => {
+            if (modified && !window.confirm('You have unsaved changes. Discard them?')) return
+            navigate(`/browse/${encodeFsPath(p)}`)
+          }}
+        />
         <div className="ml-auto flex items-center gap-2 shrink-0">
+          <span className="font-mono text-[11px] text-muted uppercase tracking-wider hidden md:block">
+            {modified ? 'MODIFIED' : ''}
+          </span>
           {error && (
             <span className="font-mono text-[11px] text-primary uppercase tracking-wider mr-2">
               {error}
@@ -230,7 +214,7 @@ export default function EditorPage() {
           </button>
           <button
             onClick={handleClose}
-            className="font-mono text-[13px] font-bold uppercase tracking-widest px-3 py-1.5 bg-transparent border border-borders text-text-main hover:border-text-main hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_#F2F2F2] transition-all"
+            className="font-mono text-[13px] font-bold uppercase tracking-widest px-3 py-1.5 bg-transparent border border-borders text-text-main hover:border-text-main transition-colors"
           >
             CLOSE
           </button>

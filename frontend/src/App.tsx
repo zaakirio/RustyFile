@@ -8,6 +8,7 @@ import Layout from './components/Layout'
 const BrowserPage = lazy(() => import('./pages/BrowserPage'))
 const EditorPage = lazy(() => import('./pages/EditorPage'))
 const PlayerPage = lazy(() => import('./pages/PlayerPage'))
+const PreviewPage = lazy(() => import('./pages/PreviewPage'))
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -55,6 +56,7 @@ function AppRoutes() {
         <Route path="/browse/*" element={<Suspense fallback={<LoadingScreen />}><BrowserPage /></Suspense>} />
         <Route path="/edit/*" element={<Suspense fallback={<LoadingScreen />}><EditorPage /></Suspense>} />
         <Route path="/play/*" element={<Suspense fallback={<LoadingScreen />}><PlayerPage /></Suspense>} />
+        <Route path="/preview/*" element={<Suspense fallback={<LoadingScreen />}><PreviewPage /></Suspense>} />
         <Route
           path="/stash/*"
           element={

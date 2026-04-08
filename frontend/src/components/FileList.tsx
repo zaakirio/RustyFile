@@ -8,6 +8,8 @@ interface FileListProps {
   error: string | null
   onItemClick: (entry: FileEntry) => void
   onDelete: (path: string) => void
+  selected: Set<string>
+  onToggleSelect: (path: string) => void
 }
 
 export default function FileList({
@@ -16,6 +18,8 @@ export default function FileList({
   error,
   onItemClick,
   onDelete,
+  selected,
+  onToggleSelect,
 }: FileListProps) {
   if (loading) {
     return (
@@ -56,6 +60,8 @@ export default function FileList({
     [listing.items]
   )
 
+  const selectMode = selected.size > 0
+
   return (
     <div className="flex-1 overflow-y-auto">
       {/* Desktop column headers */}
@@ -79,6 +85,9 @@ export default function FileList({
           entry={entry}
           onItemClick={onItemClick}
           onDelete={onDelete}
+          isSelected={selected.has(entry.path)}
+          selectMode={selectMode}
+          onToggleSelect={onToggleSelect}
         />
       ))}
 

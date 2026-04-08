@@ -6,8 +6,17 @@ export function encodeFsPath(p: string): string {
 
 /** Extract the filesystem path from the current URL for a given route prefix */
 export function extractFsPath(pathname: string, prefix: string): string {
+  // Handle both "/browse/" and "/browse" (without trailing slash = root)
+  const base = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix
+  if (pathname === base || pathname === base + '/') return ''
   const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : pathname
-  return raw.startsWith('/') ? raw.slice(1) : raw
+  const stripped = raw.startsWith('/') ? raw.slice(1) : raw
+  // Decode URI-encoded segments (e.g. spaces, special chars)
+  try {
+    return decodeURIComponent(stripped)
+  } catch {
+    return stripped
+  }
 }
 
 /** Check if a file entry is a text/code file that should open in the editor */
