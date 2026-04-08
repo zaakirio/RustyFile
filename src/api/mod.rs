@@ -4,10 +4,12 @@ pub mod files;
 pub mod health;
 pub mod hls;
 pub mod middleware;
+pub mod search;
 pub mod setup;
 pub mod thumbs;
 pub mod tus;
 
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use axum::extract::DefaultBodyLimit;
@@ -24,24 +26,61 @@ use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
 
-/// Extract client IP from proxy headers.
+/// Parse comma-separated trusted proxy IPs into a list of IpAddr.
+/// Returns None if the list is empty (meaning trust all).
+fn parse_trusted_proxies(config_value: &str) -> Option<Vec<IpAddr>> {
+    let trimmed = config_value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let addrs: Vec<IpAddr> = trimmed
+        .split(',')
+        .filter_map(|s| s.trim().parse::<IpAddr>().ok())
+        .collect();
+    if addrs.is_empty() { None } else { Some(addrs) }
+}
+
+/// Extract the real client IP address.
 ///
-/// **Security note:** This trusts X-Forwarded-For unconditionally.
-/// In production, ensure a reverse proxy (nginx, Traefik) strips/sets
-/// this header from untrusted sources. Configure `RUSTYFILE_TRUSTED_PROXIES`
-/// if direct client access is possible.
-pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(|s| s.trim().to_string())
-        .or_else(|| {
-            headers
-                .get("x-real-ip")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string())
-        })
+/// When `trusted_proxies` is empty: trusts proxy headers unconditionally
+/// (backwards compatible — assumes a reverse proxy strips spoofed headers).
+///
+/// When `trusted_proxies` is set: only reads X-Forwarded-For / X-Real-IP
+/// if the direct peer address is in the trusted list.
+pub fn extract_client_ip(
+    headers: &axum::http::HeaderMap,
+    peer_addr: Option<SocketAddr>,
+    trusted_proxies: &str,
+) -> String {
+    let peer_ip = peer_addr.map(|a| a.ip());
+    let trusted = parse_trusted_proxies(trusted_proxies);
+
+    let should_trust_headers = match (&trusted, peer_ip) {
+        (None, _) => true,
+        (Some(list), Some(ip)) => list.contains(&ip),
+        (Some(_), None) => false,
+    };
+
+    if should_trust_headers {
+        if let Some(forwarded) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(',').next())
+            .map(|s| s.trim().to_string())
+        {
+            return forwarded;
+        }
+        if let Some(real_ip) = headers
+            .get("x-real-ip")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim().to_string())
+        {
+            return real_ip;
+        }
+    }
+
+    peer_ip
+        .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".into())
 }
 
@@ -52,6 +91,7 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/health", health::routes())
         .nest("/setup", setup::routes())
         .nest("/auth", auth::routes())
+        .nest("/fs/search", search::routes(state.clone()))
         .nest("/fs", files::routes(state.clone()))
         // Axum nest doesn't match trailing slash.
         .route("/fs/", get(|| async { Redirect::permanent("/api/fs") }))
@@ -77,7 +117,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let trace_layer =
         TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
-            let client_ip = extract_client_ip(request.headers());
+            let client_ip = extract_client_ip(request.headers(), None, "");
             tracing::info_span!(
                 "request",
                 method = %request.method(),

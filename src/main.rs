@@ -70,13 +70,60 @@ async fn main() -> anyhow::Result<()> {
 
     let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
 
-    // Spawn filesystem watcher for cache invalidation
+    let thumb_cache_dir = std::path::PathBuf::from(&config.data_dir)
+        .join("cache")
+        .join("thumbs");
+    tokio::fs::create_dir_all(&thumb_cache_dir).await?;
+    let thumb_worker = rustyfile::services::thumbnail::ThumbWorker::new(
+        4, // max concurrent thumbnail generations
+        thumb_cache_dir,
+        300, // 300px max dimension
+    );
+
+    let hls_dir = std::path::PathBuf::from(&config.data_dir)
+        .join("cache")
+        .join("hls");
+    tokio::fs::create_dir_all(&hls_dir).await?;
+    let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
+    let hls_sources: Arc<dashmap::DashMap<String, std::path::PathBuf>> =
+        Arc::new(dashmap::DashMap::new());
+
+    let search_indexer =
+        rustyfile::services::search_index::SearchIndexer::new(pool.clone(), canonical_root.clone());
+
+    let state = AppState {
+        db: pool,
+        config: config.clone(),
+        setup_guard,
+        jwt_secret,
+        canonical_root,
+        login_limiter,
+        dummy_hash,
+        dir_cache,
+        thumb_worker,
+        transcoder,
+        hls_sources,
+        search_indexer,
+    };
+
+    // Spawn background full reindex of the search index.
+    {
+        let indexer = state.search_indexer.clone();
+        tokio::spawn(async move {
+            if let Err(e) = indexer.full_reindex().await {
+                tracing::error!("Search index build failed: {e:#}");
+            }
+        });
+    }
+
+    // Spawn filesystem watcher for cache invalidation and search index updates.
     {
         use notify::RecursiveMode;
         use notify_debouncer_full::new_debouncer;
 
-        let dir_cache_watcher = dir_cache.clone();
-        let watch_root = canonical_root.clone();
+        let dir_cache_watcher = state.dir_cache.clone();
+        let watch_root = state.canonical_root.clone();
+        let search_indexer_watcher = state.search_indexer.clone();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(256);
 
@@ -98,49 +145,27 @@ async fn main() -> anyhow::Result<()> {
             while let Some(Ok(events)) = rx.recv().await {
                 for event in events {
                     for path in &event.paths {
+                        // Cache invalidation
                         if let Some(parent) = path.parent() {
                             let key = parent.to_string_lossy().to_string();
                             dir_cache_watcher.invalidate(&key).await;
+                        }
+                        // Search index update
+                        if let Ok(rel) = path.strip_prefix(&watch_root) {
+                            let rel_str = rel.to_string_lossy().to_string();
+                            if path.exists() {
+                                let _ = search_indexer_watcher.upsert(&rel_str).await;
+                            } else {
+                                let _ = search_indexer_watcher.remove(&rel_str).await;
+                            }
                         }
                     }
                 }
             }
         });
 
-        tracing::info!("Filesystem watcher active for cache invalidation");
+        tracing::info!("Filesystem watcher active for cache invalidation and search indexing");
     }
-
-    let thumb_cache_dir = std::path::PathBuf::from(&config.data_dir)
-        .join("cache")
-        .join("thumbs");
-    tokio::fs::create_dir_all(&thumb_cache_dir).await?;
-    let thumb_worker = rustyfile::services::thumbnail::ThumbWorker::new(
-        4, // max concurrent thumbnail generations
-        thumb_cache_dir,
-        300, // 300px max dimension
-    );
-
-    let hls_dir = std::path::PathBuf::from(&config.data_dir)
-        .join("cache")
-        .join("hls");
-    tokio::fs::create_dir_all(&hls_dir).await?;
-    let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
-    let hls_sources: Arc<dashmap::DashMap<String, std::path::PathBuf>> =
-        Arc::new(dashmap::DashMap::new());
-
-    let state = AppState {
-        db: pool,
-        config: config.clone(),
-        setup_guard,
-        jwt_secret,
-        canonical_root,
-        login_limiter,
-        dummy_hash,
-        dir_cache,
-        thumb_worker,
-        transcoder,
-        hls_sources,
-    };
 
     api::tus::spawn_cleanup_task(state.db.clone(), state.config.cache_dir.clone());
 
@@ -150,9 +175,12 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("Listening on http://{addr}");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     tracing::info!("Server shut down gracefully");
     Ok(())

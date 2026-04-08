@@ -8,6 +8,7 @@ use tokio::net::TcpListener;
 use rustyfile::api::build_router;
 use rustyfile::config::AppConfig;
 use rustyfile::db::{create_pool, get_or_create_jwt_secret, run_migrations};
+use rustyfile::services::search_index::SearchIndexer;
 use rustyfile::state::{AppState, SetupGuard};
 
 #[allow(dead_code)]
@@ -16,6 +17,7 @@ pub struct TestApp {
     pub client: Client,
     pub root_dir: TempDir,
     pub data_dir: TempDir,
+    pub search_indexer: SearchIndexer,
 }
 
 #[allow(dead_code)]
@@ -41,6 +43,7 @@ impl TestApp {
             trusted_proxies: "".into(),
             cache_dir: data_dir.path().join("cache").to_string_lossy().to_string(),
             tus_expiry_hours: 24,
+            secure_cookie: false,
         };
 
         let pool = create_pool(&config).expect("Failed to create pool");
@@ -57,7 +60,10 @@ impl TestApp {
             .canonicalize()
             .expect("Root temp dir must be canonicalizable");
 
-        let login_limiter = rustyfile::state::new_login_limiter(100, 60);
+        let login_limiter = rustyfile::state::new_login_limiter(
+            std::num::NonZeroU32::new(100).unwrap(),
+            60,
+        );
 
         let dummy_hash = {
             use argon2::password_hash::SaltString;
@@ -82,6 +88,9 @@ impl TestApp {
             rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
         let hls_sources: Arc<DashMap<String, std::path::PathBuf>> = Arc::new(DashMap::new());
 
+        let search_indexer = SearchIndexer::new(pool.clone(), canonical_root.clone());
+        let search_indexer_for_test = search_indexer.clone();
+
         let state = AppState {
             db: pool,
             config,
@@ -94,6 +103,7 @@ impl TestApp {
             thumb_worker,
             transcoder,
             hls_sources,
+            search_indexer,
         };
 
         let app = build_router(state);
@@ -104,7 +114,12 @@ impl TestApp {
         let addr = listener.local_addr().unwrap().to_string();
 
         tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
         });
 
         let client = Client::builder()
@@ -117,6 +132,7 @@ impl TestApp {
             client,
             root_dir,
             data_dir,
+            search_indexer: search_indexer_for_test,
         }
     }
 
@@ -146,6 +162,10 @@ impl TestApp {
             .as_str()
             .expect("No token in create_admin response")
             .to_string()
+    }
+
+    pub async fn reindex(&self) {
+        self.search_indexer.full_reindex().await.expect("Reindex failed in test");
     }
 
     pub fn write_file(&self, path: &str, content: &[u8]) {

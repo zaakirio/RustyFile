@@ -69,6 +69,10 @@ struct CliArgs {
     /// Hours before incomplete TUS uploads expire
     #[arg(long, env = "RUSTYFILE_TUS_EXPIRY_HOURS")]
     tus_expiry_hours: Option<u64>,
+
+    /// Set cookie Secure flag (disable for local dev without HTTPS)
+    #[arg(long, env = "RUSTYFILE_SECURE_COOKIE")]
+    secure_cookie: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +129,10 @@ pub struct AppConfig {
     /// Hours before incomplete TUS uploads expire and are cleaned up.
     #[serde(default = "default_tus_expiry_hours")]
     pub tus_expiry_hours: u64,
+
+    /// Whether to set the Secure flag on auth cookies (requires HTTPS).
+    #[serde(default = "default_secure_cookie")]
+    pub secure_cookie: bool,
 }
 
 fn default_host() -> String {
@@ -175,6 +183,9 @@ fn default_cache_dir() -> String {
 fn default_tus_expiry_hours() -> u64 {
     24
 }
+fn default_secure_cookie() -> bool {
+    true
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -195,6 +206,7 @@ impl Default for AppConfig {
             trusted_proxies: default_trusted_proxies(),
             cache_dir: default_cache_dir(),
             tus_expiry_hours: default_tus_expiry_hours(),
+            secure_cookie: default_secure_cookie(),
         }
     }
 }
@@ -256,6 +268,9 @@ impl AppConfig {
         }
         if let Some(v) = cli.tus_expiry_hours {
             figment = figment.merge(Serialized::default("tus_expiry_hours", v));
+        }
+        if let Some(v) = cli.secure_cookie {
+            figment = figment.merge(Serialized::default("secure_cookie", v));
         }
 
         let config: Self = figment.extract()?;

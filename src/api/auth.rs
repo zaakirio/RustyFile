@@ -1,12 +1,13 @@
+use std::net::SocketAddr;
+
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
-use crate::api::extract_client_ip;
 use crate::db::user_repo;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -115,10 +116,15 @@ struct LogoutResponse {
 
 async fn login(
     State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
-    let client_ip = extract_client_ip(&headers);
+    let client_ip = crate::api::extract_client_ip(
+        &headers,
+        Some(peer_addr),
+        &state.config.trusted_proxies,
+    );
 
     if state.login_limiter.check_key(&client_ip).is_err() {
         tracing::warn!(client_ip = %client_ip, "Login rate limit exceeded");
@@ -150,11 +156,14 @@ async fn login(
                 state.config.jwt_expiry_hours,
             )?;
 
-            let cookie = format!(
+            let mut cookie = format!(
                 "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
                 token,
                 state.config.jwt_expiry_hours * 3600
             );
+            if state.config.secure_cookie {
+                cookie.push_str("; Secure");
+            }
 
             Ok((
                 StatusCode::OK,
@@ -177,10 +186,14 @@ async fn login(
     }
 }
 
-async fn logout() -> impl axum::response::IntoResponse {
-    let clear_cookie = "rustyfile_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0";
+async fn logout(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let mut clear_cookie =
+        "rustyfile_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0".to_string();
+    if state.config.secure_cookie {
+        clear_cookie.push_str("; Secure");
+    }
     (
-        [(axum::http::header::SET_COOKIE, clear_cookie.to_string())],
+        [(axum::http::header::SET_COOKIE, clear_cookie)],
         Json(LogoutResponse {
             message: "Logged out".into(),
         }),

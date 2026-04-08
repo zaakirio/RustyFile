@@ -1,11 +1,13 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { Upload, FolderPlus, Refresh, Xmark, Check, NavArrowLeft, NavArrowRight, Trash } from 'iconoir-react'
+import { Upload, FolderPlus, Refresh, Xmark, Check, NavArrowLeft, NavArrowRight, Trash, Search as SearchIcon } from 'iconoir-react'
 import { useFiles } from '../hooks/useFiles'
 import { useTusUpload } from '../hooks/useTusUpload'
 import { useDragDrop } from '../hooks/useDragDrop'
 import { extractFsPath, encodeFsPath, isTextFile } from '../lib/paths'
-import type { FileEntry } from '../lib/types'
+import type { FileEntry, SearchParams } from '../lib/types'
+import { useSearch } from '../hooks/useSearch'
+import FileRow from '../components/FileRow'
 import Breadcrumbs from '../components/Breadcrumbs'
 import FileList from '../components/FileList'
 import DropZone from '../components/DropZone'
@@ -34,6 +36,12 @@ export default function BrowserPage() {
   // Multi-select state
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  // Search state
+  const { results: searchResults, total: searchTotal, loading: searchLoading, error: searchError, search, clear: clearSearch, isActive: isSearchActive } = useSearch()
+  const [searchMode, setSearchMode] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchType, setSearchType] = useState<SearchParams['type']>(undefined)
 
   const toggleSelect = useCallback((path: string) => {
     setSelected((prev) => {
@@ -125,6 +133,36 @@ export default function BrowserPage() {
     setNewFolderName('')
   }, [])
 
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchQuery(value)
+    search({ q: value, type: searchType, path: currentPath || undefined })
+  }, [search, searchType, currentPath])
+
+  const handleTypeChange = useCallback((type: SearchParams['type']) => {
+    setSearchType(type)
+    if (searchQuery.length >= 2) {
+      search({ q: searchQuery, type, path: currentPath || undefined })
+    }
+  }, [search, searchQuery, currentPath])
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery('')
+    setSearchType(undefined)
+    clearSearch()
+    setSearchMode(false)
+  }, [clearSearch])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        setSearchMode(true)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   return (
     <div className="relative flex-1 flex flex-col overflow-hidden" {...dragHandlers}>
       {/* Drop zone overlay */}
@@ -194,50 +232,86 @@ export default function BrowserPage() {
 
       {/* Header with breadcrumbs + action buttons */}
       <header className="h-14 border-b border-borders flex items-center px-4 md:px-6 shrink-0 gap-4">
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-1.5 text-muted hover:text-primary transition-colors"
-            title="Back"
-          >
-            <NavArrowLeft width={18} height={18} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={() => navigate(1)}
-            className="p-1.5 text-muted hover:text-primary transition-colors"
-            title="Forward"
-          >
-            <NavArrowRight width={18} height={18} strokeWidth={1.8} />
-          </button>
-        </div>
-        <Breadcrumbs
-          path={currentPath}
-          onNavigate={(p) => navigate(`/browse/${encodeFsPath(p)}`)}
-        />
+        {searchMode ? (
+          <div className="flex-1 flex items-center gap-2 min-w-0">
+            <SearchIcon width={16} height={16} strokeWidth={1.8} className="text-muted shrink-0" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') handleClearSearch() }}
+              className="flex-1 h-8 bg-background border border-borders text-text-main font-mono text-[13px] px-3 rounded-none focus:border-primary focus:outline-none transition-colors min-w-0"
+              placeholder="Search files..."
+              autoFocus
+            />
+            <select
+              value={searchType || ''}
+              onChange={(e) => handleTypeChange((e.target.value || undefined) as SearchParams['type'])}
+              className="h-8 bg-background border border-borders text-text-main font-mono text-[11px] px-2 rounded-none focus:border-primary focus:outline-none uppercase tracking-widest"
+            >
+              <option value="">ALL</option>
+              <option value="file">FILES</option>
+              <option value="dir">FOLDERS</option>
+              <option value="image">IMAGES</option>
+              <option value="video">VIDEO</option>
+              <option value="audio">AUDIO</option>
+              <option value="document">DOCS</option>
+            </select>
+            <button onClick={handleClearSearch} className="p-1.5 text-muted hover:text-primary transition-colors" title="Close search">
+              <Xmark width={16} height={16} strokeWidth={2} />
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => navigate(-1)}
+                className="p-1.5 text-muted hover:text-primary transition-colors"
+                title="Back"
+              >
+                <NavArrowLeft width={18} height={18} strokeWidth={1.8} />
+              </button>
+              <button
+                onClick={() => navigate(1)}
+                className="p-1.5 text-muted hover:text-primary transition-colors"
+                title="Forward"
+              >
+                <NavArrowRight width={18} height={18} strokeWidth={1.8} />
+              </button>
+            </div>
+            <Breadcrumbs
+              path={currentPath}
+              onNavigate={(p) => navigate(`/browse/${encodeFsPath(p)}`)}
+            />
 
-        <div className="ml-auto flex items-center gap-2 shrink-0">
-          <button
-            onClick={refresh}
-            className="p-2 text-muted hover:text-primary transition-colors"
-            title="Refresh"
-          >
-            <Refresh width={18} height={18} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={() => setShowNewFolder(true)}
-            className="hidden md:flex p-2 text-muted hover:text-primary transition-colors"
-            title="New folder"
-          >
-            <FolderPlus width={18} height={18} strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={uploadFromPicker}
-            className="hidden md:flex items-center gap-2 h-9 px-4 bg-primary text-background font-mono text-[12px] font-bold uppercase tracking-widest hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_#F2F2F2] transition-all"
-          >
-            <Upload width={14} height={14} strokeWidth={2} />
-            UPLOAD
-          </button>
-        </div>
+            <div className="ml-auto flex items-center gap-2 shrink-0">
+              <button onClick={() => setSearchMode(true)} className="p-2 text-muted hover:text-primary transition-colors" title="Search (Ctrl+F)">
+                <SearchIcon width={18} height={18} strokeWidth={1.8} />
+              </button>
+              <button
+                onClick={refresh}
+                className="p-2 text-muted hover:text-primary transition-colors"
+                title="Refresh"
+              >
+                <Refresh width={18} height={18} strokeWidth={1.8} />
+              </button>
+              <button
+                onClick={() => setShowNewFolder(true)}
+                className="hidden md:flex p-2 text-muted hover:text-primary transition-colors"
+                title="New folder"
+              >
+                <FolderPlus width={18} height={18} strokeWidth={1.8} />
+              </button>
+              <button
+                onClick={uploadFromPicker}
+                className="hidden md:flex items-center gap-2 h-9 px-4 bg-primary text-background font-mono text-[12px] font-bold uppercase tracking-widest hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_#F2F2F2] transition-all"
+              >
+                <Upload width={14} height={14} strokeWidth={2} />
+                UPLOAD
+              </button>
+            </div>
+          </>
+        )}
       </header>
 
       {/* Inline new folder input */}
@@ -276,15 +350,59 @@ export default function BrowserPage() {
       )}
 
       {/* File listing */}
-      <FileList
-        listing={listing}
-        loading={loading}
-        error={error}
-        onItemClick={handleNavigate}
-        onDelete={handleDelete}
-        selected={selected}
-        onToggleSelect={toggleSelect}
-      />
+      {isSearchActive ? (
+        <div className="flex-1 overflow-y-auto">
+          {searchLoading ? (
+            <div className="flex-1 flex items-center justify-center py-12">
+              <span className="font-mono text-[14px] text-muted uppercase tracking-widest">[ SEARCHING... ]</span>
+            </div>
+          ) : searchError ? (
+            <div className="flex-1 flex items-center justify-center py-12">
+              <span className="font-mono text-[14px] text-primary uppercase tracking-widest">[ ERROR: {searchError} ]</span>
+            </div>
+          ) : searchResults.length === 0 && searchQuery.length >= 2 ? (
+            <div className="flex-1 flex items-center justify-center py-12">
+              <span className="font-mono text-[14px] text-muted uppercase tracking-widest">[ NO RESULTS ]</span>
+            </div>
+          ) : searchResults.length > 0 ? (
+            <>
+              <div className="hidden md:grid grid-cols-[1fr_120px_150px_120px] items-center h-9 px-4 border-b border-borders">
+                <span className="font-mono text-[11px] text-muted uppercase tracking-widest">NAME</span>
+                <span className="font-mono text-[11px] text-muted uppercase tracking-widest">SIZE</span>
+                <span className="font-mono text-[11px] text-muted uppercase tracking-widest">MODIFIED</span>
+                <span />
+              </div>
+              {searchResults.map((entry) => (
+                <FileRow
+                  key={entry.path}
+                  entry={entry}
+                  onItemClick={handleNavigate}
+                  onDelete={handleDelete}
+                  isSelected={false}
+                  selectMode={false}
+                  onToggleSelect={() => {}}
+                  showFullPath
+                />
+              ))}
+              <div className="hidden md:flex items-center h-9 px-4 border-t border-borders">
+                <span className="font-mono text-[11px] text-muted uppercase tracking-widest">
+                  {searchResults.length} OF {searchTotal} RESULT{searchTotal !== 1 ? 'S' : ''}
+                </span>
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : (
+        <FileList
+          listing={listing}
+          loading={loading}
+          error={error}
+          onItemClick={handleNavigate}
+          onDelete={handleDelete}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+        />
+      )}
 
       {/* Mobile upload FAB */}
       <UploadFAB onClick={uploadFromPicker} />

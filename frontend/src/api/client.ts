@@ -1,4 +1,4 @@
-import type { ApiError } from '../lib/types'
+import type { ApiError, SearchParams, SearchResponse } from '../lib/types'
 
 // In-memory token for programmatic API calls (TUS uploads, etc.)
 // NOT persisted to localStorage. Session survives via HttpOnly cookie.
@@ -67,4 +67,17 @@ export const api = {
     request<T>('PUT', path, body, raw),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
+  search: (params: SearchParams) => {
+    const qs = new URLSearchParams()
+    qs.set('q', params.q)
+    if (params.type) qs.set('type', params.type)
+    if (params.min_size !== undefined) qs.set('min_size', String(params.min_size))
+    if (params.max_size !== undefined) qs.set('max_size', String(params.max_size))
+    if (params.after) qs.set('after', params.after)
+    if (params.before) qs.set('before', params.before)
+    if (params.path) qs.set('path', params.path)
+    if (params.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params.offset !== undefined) qs.set('offset', String(params.offset))
+    return request<SearchResponse>('GET', `/api/fs/search?${qs.toString()}`)
+  },
 }

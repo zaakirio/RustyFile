@@ -51,3 +51,21 @@ export interface ApiError {
   error: string
   code?: string
 }
+
+export interface SearchParams {
+  q: string
+  type?: 'file' | 'dir' | 'image' | 'video' | 'audio' | 'document'
+  min_size?: number
+  max_size?: number
+  after?: string
+  before?: string
+  path?: string
+  limit?: number
+  offset?: number
+}
+
+export interface SearchResponse {
+  results: FileEntry[]
+  total: number
+  query: string
+}
