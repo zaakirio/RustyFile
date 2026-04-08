@@ -56,11 +56,22 @@ pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
         )?;
 
         // Read current schema version (0 if not set).
+        // Support both the current integer representation and the legacy 1-byte
+        // blob representation before deciding which migrations to run.
         let current_version: i64 = conn
             .query_row(
-                "SELECT CAST(value AS INTEGER) FROM settings WHERE key = 'schema_version'",
+                "SELECT value FROM settings WHERE key = 'schema_version'",
                 [],
-                |row| row.get(0),
+                |row| {
+                    let value = row.get_ref(0)?;
+                    match value {
+                        rusqlite::types::ValueRef::Integer(version) => Ok(version),
+                        rusqlite::types::ValueRef::Blob(bytes) if bytes.len() == 1 => {
+                            Ok(i64::from(bytes[0]))
+                        }
+                        _ => Ok(0),
+                    }
+                },
             )
             .unwrap_or(0);
 
