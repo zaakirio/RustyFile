@@ -347,14 +347,22 @@ impl SearchIndexer {
         let offset = query.offset;
         let q_text = query.q.clone();
 
+        fn escape_like_term(term: &str) -> String {
+            term.replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        }
+
+        let escaped_q = escape_like_term(&query.q);
+
         conn.interact(move |conn| {
             // Build dynamic WHERE conditions and parameter list.
             let mut conditions: Vec<String> = Vec::new();
             let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
             // ?1 — the search term (used in WHERE and ORDER BY)
-            param_values.push(Box::new(query.q.clone()));
-            conditions.push("name LIKE '%' || ?1 || '%' COLLATE NOCASE".to_string());
+            param_values.push(Box::new(escaped_q.clone()));
+            conditions.push("name LIKE ('%' || ?1 || '%') ESCAPE '\\' COLLATE NOCASE".to_string());
 
             let mut next_param = 2u32;
 
