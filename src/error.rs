@@ -58,13 +58,26 @@ impl From<anyhow::Error> for AppError {
 
 impl From<crate::services::transcoder::TranscodeError> for AppError {
     fn from(err: crate::services::transcoder::TranscodeError) -> Self {
-        Self::Internal(err.to_string())
+        use crate::services::transcoder::TranscodeError;
+        match err {
+            TranscodeError::FfmpegNotFound => Self::Internal("ffmpeg not found".into()),
+            TranscodeError::Unavailable => Self::Internal("transcoder unavailable".into()),
+            TranscodeError::ProbeFailed | TranscodeError::TranscodeFailed => {
+                Self::Internal(err.to_string())
+            }
+            TranscodeError::IoError => Self::Internal("transcode IO error".into()),
+        }
     }
 }
 
 impl From<crate::services::thumbnail::ThumbnailError> for AppError {
     fn from(err: crate::services::thumbnail::ThumbnailError) -> Self {
-        Self::Internal(err.to_string())
+        use crate::services::thumbnail::ThumbnailError;
+        match err {
+            ThumbnailError::SourceNotFound => Self::NotFound("source file not found".into()),
+            ThumbnailError::Unavailable => Self::Internal("thumbnail service unavailable".into()),
+            ThumbnailError::GenerationFailed => Self::Internal(err.to_string()),
+        }
     }
 }
 

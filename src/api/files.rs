@@ -16,6 +16,8 @@ use crate::state::AppState;
 #[serde(rename_all = "lowercase")]
 pub(crate) enum CreateKind {
     Directory,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -26,6 +28,8 @@ pub(crate) enum SortField {
     Size,
     Modified,
     Type,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,7 +124,9 @@ async fn browse(
                     let ext_b = b.extension.as_deref().unwrap_or("");
                     ext_a.to_lowercase().cmp(&ext_b.to_lowercase())
                 }
-                SortField::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortField::Name | SortField::Unknown => {
+                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                }
             };
 
             if ascending {
@@ -222,7 +228,14 @@ async fn create(
     Extension(_user): Extension<user_repo::User>,
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<MutationResponse>), AppError> {
-    let CreateKind::Directory = body.kind;
+    match body.kind {
+        CreateKind::Directory => {}
+        CreateKind::Unknown => {
+            return Err(AppError::BadRequest(
+                "Only type \"directory\" is supported for creation".into(),
+            ));
+        }
+    }
 
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
