@@ -70,7 +70,15 @@ impl FileEntry {
                 .map(|m| m.to_string())
         };
 
-        Self { name, path: rel_path, is_dir, size, modified, mime_type, extension }
+        Self {
+            name,
+            path: rel_path,
+            is_dir,
+            size,
+            modified,
+            mime_type,
+            extension,
+        }
     }
 }
 
@@ -151,7 +159,11 @@ pub async fn list_directory(
         let metadata = entry.metadata().await.map_err(AppError::Io)?;
         let entry_path = entry.path();
 
-        items.push(FileEntry::from_path_and_metadata(canonical_root, &entry_path, &metadata));
+        items.push(FileEntry::from_path_and_metadata(
+            canonical_root,
+            &entry_path,
+            &metadata,
+        ));
     }
 
     // num_dirs/num_files reflect only the returned (visible) entries.
@@ -179,10 +191,16 @@ pub async fn list_directory(
 
 pub async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
     let metadata = tokio::fs::metadata(file_path).await.map_err(|_| {
-        let rel = file_path.strip_prefix(canonical_root).unwrap_or(Path::new("unknown"));
+        let rel = file_path
+            .strip_prefix(canonical_root)
+            .unwrap_or(Path::new("unknown"));
         AppError::NotFound(format!("Not found: {}", rel.display()))
     })?;
-    Ok(FileEntry::from_path_and_metadata(canonical_root, file_path, &metadata))
+    Ok(FileEntry::from_path_and_metadata(
+        canonical_root,
+        file_path,
+        &metadata,
+    ))
 }
 
 pub async fn read_text_content(file_path: &Path) -> Result<String, AppError> {

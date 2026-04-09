@@ -37,7 +37,9 @@ async fn playlist(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Register the mapping so segment requests can resolve the source path.
-    state.hls_sources.insert(source_key.clone(), resolved.clone());
+    state
+        .hls_sources
+        .insert(source_key.clone(), resolved.clone());
 
     let m3u8 = state
         .transcoder

@@ -120,11 +120,8 @@ async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
-    let client_ip = crate::api::extract_client_ip(
-        &headers,
-        Some(peer_addr),
-        &state.config.trusted_proxies,
-    );
+    let client_ip =
+        crate::api::extract_client_ip(&headers, Some(peer_addr), &state.config.trusted_proxies);
 
     if state.login_limiter.check_key(&client_ip).is_err() {
         tracing::warn!(client_ip = %client_ip, "Login rate limit exceeded");
@@ -219,7 +216,10 @@ async fn refresh(
         state.config.jwt_expiry_hours,
     )?;
 
-    Ok(Json(RefreshResponse { token: new_token, user }))
+    Ok(Json(RefreshResponse {
+        token: new_token,
+        user,
+    }))
 }
 
 pub fn routes() -> Router<AppState> {

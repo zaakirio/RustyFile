@@ -37,7 +37,11 @@ fn parse_trusted_proxies(config_value: &str) -> Option<Vec<IpAddr>> {
         .split(',')
         .filter_map(|s| s.trim().parse::<IpAddr>().ok())
         .collect();
-    if addrs.is_empty() { None } else { Some(addrs) }
+    if addrs.is_empty() {
+        None
+    } else {
+        Some(addrs)
+    }
 }
 
 /// Extract the real client IP address.
@@ -107,11 +111,9 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/tus", tus::routes(state.clone()))
         .layer(DefaultBodyLimit::disable());
 
-    let thumb_routes = Router::new()
-        .nest("/thumbs", thumbs::routes(state.clone()));
+    let thumb_routes = Router::new().nest("/thumbs", thumbs::routes(state.clone()));
 
-    let hls_routes = Router::new()
-        .nest("/hls", hls::routes(state.clone()));
+    let hls_routes = Router::new().nest("/hls", hls::routes(state.clone()));
 
     let cors = build_cors_layer(&state.config.cors_origins);
 

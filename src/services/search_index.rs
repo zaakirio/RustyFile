@@ -257,10 +257,7 @@ impl SearchIndexer {
             .map_err(|e| anyhow::anyhow!("pool error: {e}"))?;
 
         conn.interact(move |conn| {
-            conn.execute(
-                "DELETE FROM file_index WHERE path = ?1",
-                params![rel_path],
-            )?;
+            conn.execute("DELETE FROM file_index WHERE path = ?1", params![rel_path])?;
             Ok::<_, rusqlite::Error>(())
         })
         .await
@@ -492,9 +489,8 @@ impl SearchIndexer {
                     let mime_type: Option<String> = row.get(5)?;
                     let extension: Option<String> = row.get(6)?;
 
-                    let modified: DateTime<Utc> = modified_str
-                        .parse::<DateTime<Utc>>()
-                        .unwrap_or_default();
+                    let modified: DateTime<Utc> =
+                        modified_str.parse::<DateTime<Utc>>().unwrap_or_default();
 
                     Ok(FileEntry {
                         name,
@@ -592,9 +588,7 @@ fn walk_dir_recursive(
         let mime_type = if is_dir {
             None
         } else {
-            mime_guess::from_path(&path)
-                .first()
-                .map(|m| m.to_string())
+            mime_guess::from_path(&path).first().map(|m| m.to_string())
         };
 
         entries.push(IndexEntry {

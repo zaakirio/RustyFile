@@ -65,19 +65,22 @@ async fn browse(
         let max_items = state.config.max_listing_items;
         let resolved_clone = resolved.clone();
 
-        let cached = state.dir_cache.get_or_insert(cache_key, || async {
-            let listing = file_ops::list_directory(&root, &resolved_clone, max_items)
-                .await
-                .unwrap_or_else(|_| file_ops::DirListing {
-                    path: String::new(),
-                    items: Vec::new(),
-                    num_dirs: 0,
-                    num_files: 0,
-                    total: None,
-                    truncated: false,
-                });
-            std::sync::Arc::new(listing)
-        }).await;
+        let cached = state
+            .dir_cache
+            .get_or_insert(cache_key, || async {
+                let listing = file_ops::list_directory(&root, &resolved_clone, max_items)
+                    .await
+                    .unwrap_or_else(|_| file_ops::DirListing {
+                        path: String::new(),
+                        items: Vec::new(),
+                        num_dirs: 0,
+                        num_files: 0,
+                        total: None,
+                        truncated: false,
+                    });
+                std::sync::Arc::new(listing)
+            })
+            .await;
 
         let mut listing = (*cached).clone();
 
@@ -183,7 +186,9 @@ async fn save_file(
 
     let indexer = state.search_indexer.clone();
     let idx_path = user_path.clone();
-    tokio::spawn(async move { let _ = indexer.upsert(&idx_path).await; });
+    tokio::spawn(async move {
+        let _ = indexer.upsert(&idx_path).await;
+    });
 
     Ok((
         StatusCode::OK,
@@ -216,7 +221,9 @@ async fn create(
 
     let indexer = state.search_indexer.clone();
     let idx_path = user_path.clone();
-    tokio::spawn(async move { let _ = indexer.upsert(&idx_path).await; });
+    tokio::spawn(async move {
+        let _ = indexer.upsert(&idx_path).await;
+    });
 
     Ok((
         StatusCode::CREATED,
@@ -234,7 +241,10 @@ async fn remove(
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
     // Check before delete so we know whether to remove a prefix or single entry.
-    let is_dir = tokio::fs::metadata(&resolved).await.map(|m| m.is_dir()).unwrap_or(false);
+    let is_dir = tokio::fs::metadata(&resolved)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
 
     file_ops::delete(&state.canonical_root, &resolved).await?;
 
@@ -281,7 +291,9 @@ async fn rename_item(
     let indexer = state.search_indexer.clone();
     let old_path = user_path.clone();
     let new_path = body.destination.clone();
-    tokio::spawn(async move { let _ = indexer.rename_prefix(&old_path, &new_path).await; });
+    tokio::spawn(async move {
+        let _ = indexer.rename_prefix(&old_path, &new_path).await;
+    });
 
     Ok(Json(MutationResponse {
         message: format!("Renamed {user_path} -> {}", body.destination),

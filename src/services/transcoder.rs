@@ -94,7 +94,10 @@ impl HlsTranscoder {
         let mut m3u8 = String::new();
         m3u8.push_str("#EXTM3U\n");
         m3u8.push_str("#EXT-X-VERSION:3\n");
-        m3u8.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", self.segment_duration));
+        m3u8.push_str(&format!(
+            "#EXT-X-TARGETDURATION:{}\n",
+            self.segment_duration
+        ));
         m3u8.push_str("#EXT-X-MEDIA-SEQUENCE:0\n");
         m3u8.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
 
@@ -107,9 +110,7 @@ impl HlsTranscoder {
                 seg_dur
             };
             m3u8.push_str(&format!("#EXTINF:{actual_dur:.3},\n"));
-            m3u8.push_str(&format!(
-                "/api/hls/segment/{source_key}/{i}.ts\n"
-            ));
+            m3u8.push_str(&format!("/api/hls/segment/{source_key}/{i}.ts\n"));
         }
 
         m3u8.push_str("#EXT-X-ENDLIST\n");
@@ -152,12 +153,7 @@ impl HlsTranscoder {
         let start_time = segment_index as f64 * self.segment_duration as f64;
 
         let output = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-y",
-                "-ss",
-                &format!("{start_time}"),
-                "-i",
-            ])
+            .args(["-y", "-ss", &format!("{start_time}"), "-i"])
             .arg(source)
             .args([
                 "-t",

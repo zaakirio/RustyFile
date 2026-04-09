@@ -105,7 +105,9 @@ async fn create_upload(
         .ok_or_else(|| AppError::BadRequest("Missing or invalid Upload-Length header".into()))?;
 
     if total_bytes < 0 {
-        return Err(AppError::BadRequest("Upload-Length must be non-negative".into()));
+        return Err(AppError::BadRequest(
+            "Upload-Length must be non-negative".into(),
+        ));
     }
 
     // Parse Upload-Metadata to extract destination and filename.
@@ -142,13 +144,10 @@ async fn create_upload(
     tokio::fs::create_dir_all(tmp.parent().unwrap())
         .await
         .map_err(AppError::Io)?;
-    tokio::fs::File::create(&tmp)
-        .await
-        .map_err(AppError::Io)?;
+    tokio::fs::File::create(&tmp).await.map_err(AppError::Io)?;
 
     // Compute expiry.
-    let expires_at = chrono::Utc::now()
-        + chrono::Duration::hours(expiry_hours as i64);
+    let expires_at = chrono::Utc::now() + chrono::Duration::hours(expiry_hours as i64);
     let expires_str = expires_at.to_rfc3339();
 
     // Insert into SQLite.
@@ -239,10 +238,7 @@ async fn query_offset(
         HeaderValue::from_static(TUS_RESUMABLE),
     );
     // Prevent caching of offset queries.
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-store"),
-    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
 
     Ok((StatusCode::OK, headers).into_response())
 }
@@ -396,7 +392,9 @@ async fn append_chunk(
             .map(|component| component.to_string_lossy())
             .collect::<Vec<_>>()
             .join("/");
-        tokio::spawn(async move { let _ = indexer.upsert(&idx_path).await; });
+        tokio::spawn(async move {
+            let _ = indexer.upsert(&idx_path).await;
+        });
     }
 
     // Build response.
@@ -431,9 +429,7 @@ async fn cancel_upload(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     let rows_affected = conn
-        .interact(move |conn| {
-            conn.execute("DELETE FROM uploads WHERE id = ?1", params![uid])
-        })
+        .interact(move |conn| conn.execute("DELETE FROM uploads WHERE id = ?1", params![uid]))
         .await
         .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
         .map_err(AppError::Database)?;
@@ -473,10 +469,7 @@ pub fn spawn_cleanup_task(db: deadpool_sqlite::Pool, cache_dir: String) {
     });
 }
 
-async fn cleanup_expired(
-    db: &deadpool_sqlite::Pool,
-    cache_dir: &str,
-) -> Result<(), AppError> {
+async fn cleanup_expired(db: &deadpool_sqlite::Pool, cache_dir: &str) -> Result<(), AppError> {
     let conn = db
         .get()
         .await

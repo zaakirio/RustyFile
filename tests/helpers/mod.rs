@@ -60,10 +60,8 @@ impl TestApp {
             .canonicalize()
             .expect("Root temp dir must be canonicalizable");
 
-        let login_limiter = rustyfile::state::new_login_limiter(
-            std::num::NonZeroU32::new(100).unwrap(),
-            60,
-        );
+        let login_limiter =
+            rustyfile::state::new_login_limiter(std::num::NonZeroU32::new(100).unwrap(), 60);
 
         let dummy_hash = {
             use argon2::password_hash::SaltString;
@@ -84,8 +82,7 @@ impl TestApp {
 
         let hls_dir = data_dir.path().join("cache").join("hls");
         std::fs::create_dir_all(&hls_dir).expect("Failed to create HLS cache dir");
-        let transcoder =
-            rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
+        let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
         let hls_sources: Arc<DashMap<String, std::path::PathBuf>> = Arc::new(DashMap::new());
 
         let search_indexer = SearchIndexer::new(pool.clone(), canonical_root.clone());
@@ -165,7 +162,10 @@ impl TestApp {
     }
 
     pub async fn reindex(&self) {
-        self.search_indexer.full_reindex().await.expect("Reindex failed in test");
+        self.search_indexer
+            .full_reindex()
+            .await
+            .expect("Reindex failed in test");
     }
 
     pub fn write_file(&self, path: &str, content: &[u8]) {
