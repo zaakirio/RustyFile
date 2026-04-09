@@ -78,7 +78,10 @@ pub(crate) async fn create_user(
     .await
 }
 
-pub(crate) async fn find_by_username(pool: &Pool, username: &str) -> Result<Option<User>, AppError> {
+pub(crate) async fn find_by_username(
+    pool: &Pool,
+    username: &str,
+) -> Result<Option<User>, AppError> {
     let username = username.to_string();
 
     db::interact(pool, move |conn| {

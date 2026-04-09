@@ -19,10 +19,7 @@ async fn thumbnail(
 ) -> Result<Response<Body>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
-    let thumb_path = state
-        .thumb_worker
-        .get_or_generate(&resolved)
-        .await?;
+    let thumb_path = state.thumb_worker.get_or_generate(&resolved).await?;
 
     let file = tokio::fs::File::open(&thumb_path)
         .await

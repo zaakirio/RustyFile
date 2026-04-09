@@ -35,6 +35,7 @@ impl DirCache {
         self.inner.invalidate(key).await;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn invalidate_prefix(&self, prefix: &str) {
         let prefix = prefix.to_string();
         self.inner
@@ -42,6 +43,7 @@ impl DirCache {
             .ok();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn entry_count(&self) -> u64 {
         self.inner.entry_count()
     }

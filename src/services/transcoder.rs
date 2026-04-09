@@ -91,11 +91,7 @@ impl VideoTranscoder for HlsTranscoder {
         Ok(hasher.finalize().to_hex()[..HASH_PREFIX_LEN].to_string())
     }
 
-    async fn playlist(
-        &self,
-        source: &Path,
-        source_key: &str,
-    ) -> Result<String, TranscodeError> {
+    async fn playlist(&self, source: &Path, source_key: &str) -> Result<String, TranscodeError> {
         let duration = self.probe_duration(source).await?;
         let seg_dur = self.segment_duration as f64;
         let segment_count = (duration / seg_dur).ceil() as u32;
@@ -108,7 +104,7 @@ impl VideoTranscoder for HlsTranscoder {
         m3u8.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
 
         for i in 0..segment_count {
-                let remaining = duration - (i as f64 * seg_dur);
+            let remaining = duration - (i as f64 * seg_dur);
             let actual_dur = if remaining < seg_dur {
                 remaining
             } else {

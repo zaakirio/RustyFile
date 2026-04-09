@@ -13,8 +13,8 @@ use std::io::Write;
 
 use crate::api::middleware::auth::require_auth;
 use crate::error::AppError;
-use crate::services::search_index::SearchIndex;
 use crate::services::file_ops;
+use crate::services::search_index::SearchIndex;
 use crate::state::AppState;
 
 const TUS_RESUMABLE: &str = "1.0.0";

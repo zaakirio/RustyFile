@@ -226,12 +226,26 @@ impl AppConfig {
             };
         }
 
-        merge_opt!(figment, cli,
-            host, port, root, data_dir, log_level, log_format,
-            jwt_expiry_hours, min_password_length, setup_timeout_minutes,
-            cors_origins, max_upload_bytes, max_password_length,
-            max_listing_items, trusted_proxies, cache_dir,
-            tus_expiry_hours, secure_cookie,
+        merge_opt!(
+            figment,
+            cli,
+            host,
+            port,
+            root,
+            data_dir,
+            log_level,
+            log_format,
+            jwt_expiry_hours,
+            min_password_length,
+            setup_timeout_minutes,
+            cors_origins,
+            max_upload_bytes,
+            max_password_length,
+            max_listing_items,
+            trusted_proxies,
+            cache_dir,
+            tus_expiry_hours,
+            secure_cookie,
         );
 
         let config: Self = figment.extract()?;

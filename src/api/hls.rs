@@ -27,18 +27,13 @@ async fn playlist(
         return Err(AppError::BadRequest("Cannot transcode a directory".into()));
     }
 
-    let source_key = state
-        .transcoder
-        .source_key(&resolved)?;
+    let source_key = state.transcoder.source_key(&resolved)?;
 
     state
         .hls_sources
         .insert(source_key.clone(), resolved.clone());
 
-    let m3u8 = state
-        .transcoder
-        .playlist(&resolved, &source_key)
-        .await?;
+    let m3u8 = state.transcoder.playlist(&resolved, &source_key).await?;
 
     Response::builder()
         .status(StatusCode::OK)

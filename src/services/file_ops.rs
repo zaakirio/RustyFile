@@ -182,7 +182,10 @@ pub(crate) async fn list_directory(
     })
 }
 
-pub(crate) async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
+pub(crate) async fn file_info(
+    canonical_root: &Path,
+    file_path: &Path,
+) -> Result<FileEntry, AppError> {
     let metadata = tokio::fs::metadata(file_path).await.map_err(|_| {
         let rel = file_path
             .strip_prefix(canonical_root)

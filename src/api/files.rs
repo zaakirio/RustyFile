@@ -18,19 +18,14 @@ pub(crate) enum CreateKind {
     Directory,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SortField {
+    #[default]
     Name,
     Size,
     Modified,
     Type,
-}
-
-impl Default for SortField {
-    fn default() -> Self {
-        Self::Name
-    }
 }
 
 #[derive(Debug, Deserialize)]
