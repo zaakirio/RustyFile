@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -94,10 +95,7 @@ impl HlsTranscoder {
         let mut m3u8 = String::new();
         m3u8.push_str("#EXTM3U\n");
         m3u8.push_str("#EXT-X-VERSION:3\n");
-        m3u8.push_str(&format!(
-            "#EXT-X-TARGETDURATION:{}\n",
-            self.segment_duration
-        ));
+        let _ = writeln!(m3u8, "#EXT-X-TARGETDURATION:{}", self.segment_duration);
         m3u8.push_str("#EXT-X-MEDIA-SEQUENCE:0\n");
         m3u8.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
 
@@ -109,8 +107,8 @@ impl HlsTranscoder {
             } else {
                 seg_dur
             };
-            m3u8.push_str(&format!("#EXTINF:{actual_dur:.3},\n"));
-            m3u8.push_str(&format!("/api/hls/segment/{source_key}/{i}.ts\n"));
+            let _ = writeln!(m3u8, "#EXTINF:{actual_dur:.3},");
+            let _ = writeln!(m3u8, "/api/hls/segment/{source_key}/{i}.ts");
         }
 
         m3u8.push_str("#EXT-X-ENDLIST\n");
