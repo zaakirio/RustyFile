@@ -9,6 +9,7 @@ use rustyfile::api::build_router;
 use rustyfile::config::AppConfig;
 use rustyfile::db::{create_pool, get_or_create_jwt_secret, run_migrations};
 use rustyfile::services::search_index::SearchIndexer;
+use rustyfile::services::SearchIndex;
 use rustyfile::state::{AppState, SetupGuard};
 
 #[allow(dead_code)]

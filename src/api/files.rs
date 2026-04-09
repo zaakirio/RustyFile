@@ -9,23 +9,45 @@ use crate::api::middleware::auth::require_auth;
 use crate::db::user_repo;
 use crate::error::AppError;
 use crate::services::file_ops;
+use crate::services::search_index::SearchIndex;
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
-pub struct BrowseQuery {
+#[serde(rename_all = "lowercase")]
+pub(crate) enum CreateKind {
+    Directory,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SortField {
+    #[default]
+    Name,
+    Size,
+    Modified,
+    Type,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct BrowseQuery {
     pub content: Option<bool>,
-    pub sort: Option<String>,
+    #[serde(default)]
+    pub sort: SortField,
     pub order: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateBody {
+pub(crate) struct CreateBody {
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind: CreateKind,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RenameBody {
+pub(crate) struct RenameBody {
     pub destination: String,
     #[serde(default)]
     pub overwrite: bool,
@@ -84,7 +106,7 @@ async fn browse(
 
         let mut listing = (*cached).clone();
 
-        let sort_field = query.sort.as_deref().unwrap_or("name");
+        let sort_field = &query.sort;
         let ascending = query.order.as_deref().unwrap_or("asc") != "desc";
 
         listing.items.sort_by(|a, b| {
@@ -95,14 +117,16 @@ async fn browse(
             }
 
             let ord = match sort_field {
-                "size" => a.size.cmp(&b.size),
-                "modified" => a.modified.cmp(&b.modified),
-                "type" => {
+                SortField::Size => a.size.cmp(&b.size),
+                SortField::Modified => a.modified.cmp(&b.modified),
+                SortField::Type => {
                     let ext_a = a.extension.as_deref().unwrap_or("");
                     let ext_b = b.extension.as_deref().unwrap_or("");
                     ext_a.to_lowercase().cmp(&ext_b.to_lowercase())
                 }
-                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortField::Name | SortField::Unknown => {
+                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                }
             };
 
             if ascending {
@@ -204,10 +228,13 @@ async fn create(
     Extension(_user): Extension<user_repo::User>,
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<MutationResponse>), AppError> {
-    if body.kind != "directory" {
-        return Err(AppError::BadRequest(
-            "Only type \"directory\" is supported for creation".into(),
-        ));
+    match body.kind {
+        CreateKind::Directory => {}
+        CreateKind::Unknown => {
+            return Err(AppError::BadRequest(
+                "Only type \"directory\" is supported for creation".into(),
+            ));
+        }
     }
 
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
@@ -240,7 +267,7 @@ async fn remove(
 ) -> Result<Json<MutationResponse>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
-    // Check before delete so we know whether to remove a prefix or single entry.
+    // Need is_dir before delete to choose index removal strategy.
     let is_dir = tokio::fs::metadata(&resolved)
         .await
         .map(|m| m.is_dir())

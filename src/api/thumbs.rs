@@ -9,6 +9,7 @@ use crate::api::middleware::auth::require_auth;
 use crate::db::user_repo;
 use crate::error::AppError;
 use crate::services::file_ops;
+use crate::services::thumbnail::ThumbnailGenerator;
 use crate::state::AppState;
 
 async fn thumbnail(
@@ -18,11 +19,7 @@ async fn thumbnail(
 ) -> Result<Response<Body>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
-    let thumb_path = state
-        .thumb_worker
-        .get_or_generate(&resolved)
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let thumb_path = state.thumb_worker.get_or_generate(&resolved).await?;
 
     let file = tokio::fs::File::open(&thumb_path)
         .await

@@ -4,11 +4,19 @@ use std::sync::Arc;
 
 use tokio::sync::Semaphore;
 
-/// On-demand HLS transcoder backed by FFmpeg subprocesses.
-///
-/// Probes video duration with `ffprobe`, generates m3u8 playlists dynamically,
-/// and transcodes individual .ts segments on-demand (not all at once). Segments
-/// are cached on disk keyed by blake3(path + mtime) to avoid redundant work.
+const HASH_PREFIX_LEN: usize = 24;
+
+#[async_trait::async_trait]
+pub trait VideoTranscoder: Send + Sync {
+    fn source_key(&self, source: &Path) -> Result<String, TranscodeError>;
+    async fn playlist(&self, source: &Path, source_key: &str) -> Result<String, TranscodeError>;
+    async fn segment(
+        &self,
+        source: &Path,
+        source_key: &str,
+        segment_index: u32,
+    ) -> Result<PathBuf, TranscodeError>;
+}
 #[derive(Clone)]
 pub struct HlsTranscoder {
     segment_dir: PathBuf,
@@ -25,7 +33,6 @@ impl HlsTranscoder {
         }
     }
 
-    /// Probe the duration of a video file in seconds via `ffprobe`.
     pub async fn probe_duration(&self, source: &Path) -> Result<f64, TranscodeError> {
         let output = tokio::process::Command::new("ffprobe")
             .args([
@@ -63,9 +70,11 @@ impl HlsTranscoder {
 
         Ok(duration)
     }
+}
 
-    /// Compute a stable cache key for a source video (blake3 hash of path + mtime).
-    pub fn source_key(&self, source: &Path) -> Result<String, TranscodeError> {
+#[async_trait::async_trait]
+impl VideoTranscoder for HlsTranscoder {
+    fn source_key(&self, source: &Path) -> Result<String, TranscodeError> {
         let meta = std::fs::metadata(source).map_err(|_| TranscodeError::IoError)?;
 
         let mtime = meta
@@ -79,15 +88,10 @@ impl HlsTranscoder {
         hasher.update(source.to_string_lossy().as_bytes());
         hasher.update(&mtime.to_le_bytes());
 
-        Ok(hasher.finalize().to_hex()[..24].to_string())
+        Ok(hasher.finalize().to_hex()[..HASH_PREFIX_LEN].to_string())
     }
 
-    /// Generate an HLS m3u8 playlist for the given source video.
-    pub async fn playlist(
-        &self,
-        source: &Path,
-        source_key: &str,
-    ) -> Result<String, TranscodeError> {
+    async fn playlist(&self, source: &Path, source_key: &str) -> Result<String, TranscodeError> {
         let duration = self.probe_duration(source).await?;
         let seg_dur = self.segment_duration as f64;
         let segment_count = (duration / seg_dur).ceil() as u32;
@@ -100,7 +104,6 @@ impl HlsTranscoder {
         m3u8.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
 
         for i in 0..segment_count {
-            // Last segment may be shorter than segment_duration.
             let remaining = duration - (i as f64 * seg_dur);
             let actual_dur = if remaining < seg_dur {
                 remaining
@@ -116,8 +119,7 @@ impl HlsTranscoder {
         Ok(m3u8)
     }
 
-    /// Generate (or return cached) a single .ts segment for the given source video.
-    pub async fn segment(
+    async fn segment(
         &self,
         source: &Path,
         source_key: &str,
@@ -126,24 +128,22 @@ impl HlsTranscoder {
         let key_dir = self.segment_dir.join(source_key);
         let segment_path = key_dir.join(format!("{segment_index}.ts"));
 
-        // Fast path: segment already cached on disk.
+        // Fast path: already cached.
         if segment_path.exists() {
             return Ok(segment_path);
         }
 
-        // Acquire semaphore permit to limit concurrent FFmpeg processes.
         let _permit = self
             .semaphore
             .acquire()
             .await
             .map_err(|_| TranscodeError::Unavailable)?;
 
-        // Double-check after acquiring the permit (another task may have generated it).
+        // Double-check after acquiring permit (another task may have generated it).
         if segment_path.exists() {
             return Ok(segment_path);
         }
 
-        // Ensure the key directory exists.
         tokio::fs::create_dir_all(&key_dir)
             .await
             .map_err(|_| TranscodeError::IoError)?;
@@ -187,7 +187,6 @@ impl HlsTranscoder {
                 "ffmpeg transcode failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            // Clean up partial file if it exists.
             let _ = tokio::fs::remove_file(&segment_path).await;
             return Err(TranscodeError::TranscodeFailed);
         }

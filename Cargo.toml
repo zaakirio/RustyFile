@@ -44,6 +44,7 @@ num_cpus = "1"
 futures-util = "0.3.32"
 http-body-util = "0.1"
 rust-embed = { version = "8", features = ["compression"], optional = true }
+async-trait = "0.1.89"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }

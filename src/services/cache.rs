@@ -34,15 +34,4 @@ impl DirCache {
     pub async fn invalidate(&self, key: &str) {
         self.inner.invalidate(key).await;
     }
-
-    pub fn invalidate_prefix(&self, prefix: &str) {
-        let prefix = prefix.to_string();
-        self.inner
-            .invalidate_entries_if(move |key, _| key.starts_with(&prefix))
-            .ok();
-    }
-
-    pub fn entry_count(&self) -> u64 {
-        self.inner.entry_count()
-    }
 }

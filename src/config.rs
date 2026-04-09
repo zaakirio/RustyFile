@@ -110,27 +110,22 @@ pub struct AppConfig {
     #[serde(default = "default_max_upload_bytes")]
     pub max_upload_bytes: usize,
 
-    /// Max length prevents Argon2 DoS with extremely long passwords.
+    /// Prevents Argon2 DoS.
     #[serde(default = "default_max_password_length")]
     pub max_password_length: usize,
 
     #[serde(default = "default_max_listing_items")]
     pub max_listing_items: usize,
 
-    /// Comma-separated list of trusted proxy IPs for X-Forwarded-For.
-    /// Empty means trust all (development default).
     #[serde(default = "default_trusted_proxies")]
     pub trusted_proxies: String,
 
-    /// Directory for cache data (TUS temp files, thumbnails, etc.).
     #[serde(default = "default_cache_dir")]
     pub cache_dir: String,
 
-    /// Hours before incomplete TUS uploads expire and are cleaned up.
     #[serde(default = "default_tus_expiry_hours")]
     pub tus_expiry_hours: u64,
 
-    /// Whether to set the Secure flag on auth cookies (requires HTTPS).
     #[serde(default = "default_secure_cookie")]
     pub secure_cookie: bool,
 }
@@ -221,57 +216,37 @@ impl AppConfig {
             .merge(Toml::file("config.toml").nested())
             .merge(Env::prefixed("RUSTYFILE_").lowercase(false));
 
-        if let Some(v) = &cli.host {
-            figment = figment.merge(Serialized::default("host", v));
+        macro_rules! merge_opt {
+            ($figment:expr, $cli:expr, $($field:ident),* $(,)?) => {
+                $(
+                    if let Some(ref v) = $cli.$field {
+                        $figment = $figment.merge(Serialized::default(stringify!($field), v));
+                    }
+                )*
+            };
         }
-        if let Some(v) = cli.port {
-            figment = figment.merge(Serialized::default("port", v));
-        }
-        if let Some(v) = &cli.root {
-            figment = figment.merge(Serialized::default("root", v));
-        }
-        if let Some(v) = &cli.data_dir {
-            figment = figment.merge(Serialized::default("data_dir", v));
-        }
-        if let Some(v) = &cli.log_level {
-            figment = figment.merge(Serialized::default("log_level", v));
-        }
-        if let Some(v) = &cli.log_format {
-            figment = figment.merge(Serialized::default("log_format", v));
-        }
-        if let Some(v) = cli.jwt_expiry_hours {
-            figment = figment.merge(Serialized::default("jwt_expiry_hours", v));
-        }
-        if let Some(v) = cli.min_password_length {
-            figment = figment.merge(Serialized::default("min_password_length", v));
-        }
-        if let Some(v) = cli.setup_timeout_minutes {
-            figment = figment.merge(Serialized::default("setup_timeout_minutes", v));
-        }
-        if let Some(v) = &cli.cors_origins {
-            figment = figment.merge(Serialized::default("cors_origins", v));
-        }
-        if let Some(v) = cli.max_upload_bytes {
-            figment = figment.merge(Serialized::default("max_upload_bytes", v));
-        }
-        if let Some(v) = cli.max_password_length {
-            figment = figment.merge(Serialized::default("max_password_length", v));
-        }
-        if let Some(v) = cli.max_listing_items {
-            figment = figment.merge(Serialized::default("max_listing_items", v));
-        }
-        if let Some(v) = &cli.trusted_proxies {
-            figment = figment.merge(Serialized::default("trusted_proxies", v));
-        }
-        if let Some(v) = &cli.cache_dir {
-            figment = figment.merge(Serialized::default("cache_dir", v));
-        }
-        if let Some(v) = cli.tus_expiry_hours {
-            figment = figment.merge(Serialized::default("tus_expiry_hours", v));
-        }
-        if let Some(v) = cli.secure_cookie {
-            figment = figment.merge(Serialized::default("secure_cookie", v));
-        }
+
+        merge_opt!(
+            figment,
+            cli,
+            host,
+            port,
+            root,
+            data_dir,
+            log_level,
+            log_format,
+            jwt_expiry_hours,
+            min_password_length,
+            setup_timeout_minutes,
+            cors_origins,
+            max_upload_bytes,
+            max_password_length,
+            max_listing_items,
+            trusted_proxies,
+            cache_dir,
+            tus_expiry_hours,
+            secure_cookie,
+        );
 
         let config: Self = figment.extract()?;
         Ok(config)
@@ -281,8 +256,6 @@ impl AppConfig {
         std::path::PathBuf::from(&self.data_dir).join("rustyfile.db")
     }
 
-    /// Log warnings for security-sensitive configuration defaults.
-    /// Call once at startup after logging is initialized.
     pub fn log_security_warnings(&self) {
         if self.cors_origins.trim() == "*" || self.cors_origins.trim().is_empty() {
             tracing::warn!(

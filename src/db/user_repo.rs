@@ -41,7 +41,7 @@ pub async fn admin_exists(pool: &Pool) -> Result<bool, AppError> {
     .await
 }
 
-pub fn hash_password(password: &str) -> Result<String, AppError> {
+pub(crate) fn hash_password(password: &str) -> Result<String, AppError> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
     let hash = argon2
@@ -50,7 +50,7 @@ pub fn hash_password(password: &str) -> Result<String, AppError> {
     Ok(hash.to_string())
 }
 
-pub async fn create_user(
+pub(crate) async fn create_user(
     pool: &Pool,
     username: &str,
     password_hash: &str,
@@ -78,7 +78,10 @@ pub async fn create_user(
     .await
 }
 
-pub async fn find_by_username(pool: &Pool, username: &str) -> Result<Option<User>, AppError> {
+pub(crate) async fn find_by_username(
+    pool: &Pool,
+    username: &str,
+) -> Result<Option<User>, AppError> {
     let username = username.to_string();
 
     db::interact(pool, move |conn| {
@@ -98,7 +101,7 @@ pub async fn find_by_username(pool: &Pool, username: &str) -> Result<Option<User
     .await
 }
 
-pub async fn find_by_id(pool: &Pool, user_id: i64) -> Result<Option<User>, AppError> {
+pub(crate) async fn find_by_id(pool: &Pool, user_id: i64) -> Result<Option<User>, AppError> {
     db::interact(pool, move |conn| {
         let result = conn.query_row(
             "SELECT id, username, password_hash, role, created_at, updated_at \

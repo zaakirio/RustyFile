@@ -4,6 +4,13 @@ use std::sync::Arc;
 
 use tokio::sync::Semaphore;
 
+const HASH_PREFIX_LEN: usize = 24;
+
+#[async_trait::async_trait]
+pub trait ThumbnailGenerator: Send + Sync {
+    async fn get_or_generate(&self, source: &Path) -> Result<PathBuf, ThumbnailError>;
+}
+
 #[derive(Clone)]
 pub struct ThumbWorker {
     semaphore: Arc<Semaphore>,
@@ -20,8 +27,30 @@ impl ThumbWorker {
         }
     }
 
-    /// Return path to cached thumbnail, generating if needed.
-    pub async fn get_or_generate(&self, source: &Path) -> Result<PathBuf, ThumbnailError> {
+    async fn cache_key(&self, source: &Path) -> Result<String, ThumbnailError> {
+        let meta = tokio::fs::metadata(source)
+            .await
+            .map_err(|_| ThumbnailError::SourceNotFound)?;
+
+        let mtime = meta
+            .modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(source.to_string_lossy().as_bytes());
+        hasher.update(&meta.len().to_le_bytes());
+        hasher.update(&mtime.to_le_bytes());
+
+        Ok(hasher.finalize().to_hex()[..HASH_PREFIX_LEN].to_string())
+    }
+}
+
+#[async_trait::async_trait]
+impl ThumbnailGenerator for ThumbWorker {
+    async fn get_or_generate(&self, source: &Path) -> Result<PathBuf, ThumbnailError> {
         let cache_key = self.cache_key(source).await?;
         let cached_path = self.cache_dir.join(format!("{cache_key}.jpg"));
 
@@ -49,26 +78,6 @@ impl ThumbWorker {
             .map_err(|_| ThumbnailError::GenerationFailed)??;
 
         Ok(cached_path)
-    }
-
-    async fn cache_key(&self, source: &Path) -> Result<String, ThumbnailError> {
-        let meta = tokio::fs::metadata(source)
-            .await
-            .map_err(|_| ThumbnailError::SourceNotFound)?;
-
-        let mtime = meta
-            .modified()
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(source.to_string_lossy().as_bytes());
-        hasher.update(&meta.len().to_le_bytes());
-        hasher.update(&mtime.to_le_bytes());
-
-        Ok(hasher.finalize().to_hex()[..24].to_string())
     }
 }
 

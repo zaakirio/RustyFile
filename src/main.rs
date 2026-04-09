@@ -7,6 +7,7 @@ use tracing_subscriber::EnvFilter;
 use rustyfile::api;
 use rustyfile::config::AppConfig;
 use rustyfile::db;
+use rustyfile::services::search_index::SearchIndex;
 use rustyfile::state::{AppState, SetupGuard};
 
 #[tokio::main]
@@ -18,12 +19,10 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::fs::create_dir_all(&config.root).await?;
     tokio::fs::create_dir_all(&config.data_dir).await?;
-    // TUS upload temp directory
     let tus_upload_dir = std::path::PathBuf::from(&config.cache_dir).join("uploads");
     tokio::fs::create_dir_all(&tus_upload_dir).await?;
     tracing::info!(root = %config.root, data_dir = %config.data_dir, cache_dir = %config.cache_dir, "Directories ensured");
 
-    // Clean up orphaned temp files from interrupted writes without delaying startup.
     let cleanup_root = config.root.clone();
     tokio::spawn(async move {
         cleanup_orphan_temp_files(&cleanup_root).await;
@@ -46,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
 
     let jwt_secret = db::get_or_create_jwt_secret(&pool).await?;
 
-    // Canonicalize once at startup to avoid per-request syscalls.
+    // Avoid per-request syscalls.
     let canonical_root = std::path::PathBuf::from(&config.root)
         .canonicalize()
         .expect("Root directory must exist and be accessible");
@@ -55,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let login_limiter =
         rustyfile::state::new_login_limiter(std::num::NonZeroU32::new(10).unwrap(), 15 * 60);
 
-    // Pre-hash a dummy password for constant-time login failure.
+    // Constant-time login failure (timing-attack mitigation).
     let dummy_hash = {
         use argon2::password_hash::SaltString;
         use argon2::PasswordHasher;
@@ -104,7 +103,6 @@ async fn main() -> anyhow::Result<()> {
         search_indexer,
     };
 
-    // Spawn background full reindex of the search index.
     {
         let indexer = state.search_indexer.clone();
         tokio::spawn(async move {
@@ -114,7 +112,6 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Spawn filesystem watcher for cache invalidation and search index updates.
     {
         use notify::RecursiveMode;
         use notify_debouncer_full::new_debouncer;
@@ -143,12 +140,10 @@ async fn main() -> anyhow::Result<()> {
             while let Some(Ok(events)) = rx.recv().await {
                 for event in events {
                     for path in &event.paths {
-                        // Cache invalidation
                         if let Some(parent) = path.parent() {
                             let key = parent.to_string_lossy().to_string();
                             dir_cache_watcher.invalidate(&key).await;
                         }
-                        // Search index update
                         if let Ok(rel) = path.strip_prefix(&watch_root) {
                             let rel_str = rel.to_string_lossy().to_string();
                             if path.exists() {
