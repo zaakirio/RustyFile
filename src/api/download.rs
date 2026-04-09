@@ -24,7 +24,6 @@ struct ByteRange {
     end: u64, // inclusive
 }
 
-/// Only single-range requests are supported.
 fn parse_range(header: &str, file_size: u64) -> Option<ByteRange> {
     let range_str = header.strip_prefix("bytes=")?;
 
@@ -69,7 +68,6 @@ fn parse_range(header: &str, file_size: u64) -> Option<ByteRange> {
     }
 }
 
-/// RFC 5987 Content-Disposition with both ASCII and UTF-8 filename parameters.
 fn content_disposition(filename: &str, inline: bool) -> String {
     let disposition_type = if inline { "inline" } else { "attachment" };
 

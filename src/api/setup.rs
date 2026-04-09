@@ -44,7 +44,7 @@ async fn create_admin(
         return Err(AppError::SetupExpired);
     }
 
-    // Double-check DB to guard against race conditions.
+    // Guard against race conditions.
     if user_repo::admin_exists(&state.db).await? {
         state.setup_guard.mark_complete();
         return Err(AppError::Conflict("Admin account already exists".into()));
@@ -65,7 +65,7 @@ async fn create_admin(
         ));
     }
 
-    // Max length prevents Argon2 DoS with extremely long passwords.
+    // Prevents Argon2 DoS.
     if body.password.len() < state.config.min_password_length {
         return Err(AppError::BadRequest(format!(
             "Password must be at least {} characters",

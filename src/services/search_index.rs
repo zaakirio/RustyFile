@@ -8,10 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::services::file_ops::FileEntry;
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FileType {
@@ -29,8 +25,7 @@ fn default_limit() -> u32 {
     DEFAULT_SEARCH_LIMIT
 }
 
-/// Escape SQLite LIKE metacharacters (`%`, `_`, `\`) so the string is treated
-/// as a literal substring / prefix.  Use together with `ESCAPE '\'`.
+/// Escape SQLite LIKE metacharacters. Use with `ESCAPE '\'`.
 fn escape_like(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('%', "\\%")
@@ -46,7 +41,6 @@ pub struct SearchQuery {
     pub max_size: Option<u64>,
     pub after: Option<String>,
     pub before: Option<String>,
-    /// Scope results to a subdirectory.
     pub path: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: u32,
@@ -61,38 +55,15 @@ pub struct SearchResults {
     pub query: String,
 }
 
-// ---------------------------------------------------------------------------
-// Trait
-// ---------------------------------------------------------------------------
-
-/// Abstraction over file search indexing for testability.
-///
-/// The canonical implementation is [`SearchIndexer`]. In tests you can supply a
-/// mock or stub via `Box<dyn SearchIndex>`.
 #[async_trait::async_trait]
 pub trait SearchIndex: Send + Sync {
-    /// Execute a search query against the index.
     async fn search(&self, query: SearchQuery) -> anyhow::Result<SearchResults>;
-
-    /// Walk the entire file tree and rebuild the index from scratch.
     async fn full_reindex(&self) -> anyhow::Result<()>;
-
-    /// Insert or update a single entry in the index.
     async fn upsert(&self, rel_path: &str) -> anyhow::Result<()>;
-
-    /// Remove a single entry from the index.
     async fn remove(&self, rel_path: &str) -> anyhow::Result<()>;
-
-    /// Remove an entry and all its children from the index.
     async fn remove_prefix(&self, prefix: &str) -> anyhow::Result<()>;
-
-    /// Rename an entry and all its children in the index.
     async fn rename_prefix(&self, old_prefix: &str, new_prefix: &str) -> anyhow::Result<()>;
 }
-
-// ---------------------------------------------------------------------------
-// Concrete implementation
-// ---------------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct SearchIndexer {
@@ -100,7 +71,6 @@ pub struct SearchIndexer {
     canonical_root: PathBuf,
 }
 
-/// A collected entry ready for DB insertion.
 struct IndexEntry {
     rel_path: String,
     name: String,
@@ -119,14 +89,9 @@ impl SearchIndexer {
 
 #[async_trait::async_trait]
 impl SearchIndex for SearchIndexer {
-    // -----------------------------------------------------------------------
-    // full_reindex
-    // -----------------------------------------------------------------------
-
     async fn full_reindex(&self) -> anyhow::Result<()> {
         let root = self.canonical_root.clone();
 
-        // Walk the filesystem on a blocking thread.
         let entries: Vec<IndexEntry> =
             tokio::task::spawn_blocking(move || walk_tree(&root)).await??;
 
@@ -144,7 +109,6 @@ impl SearchIndex for SearchIndexer {
 
             const BATCH_INSERT_SIZE: usize = 500;
 
-            // Batch insert in chunks.
             for chunk in entries.chunks(BATCH_INSERT_SIZE) {
                 for entry in chunk {
                     tx.execute(
@@ -164,7 +128,6 @@ impl SearchIndex for SearchIndexer {
                 }
             }
 
-            // Delete stale entries (paths in DB but not on disk).
             {
                 let mut stmt = tx.prepare("SELECT path FROM file_index")?;
                 let db_paths: Vec<String> = stmt
@@ -192,10 +155,6 @@ impl SearchIndex for SearchIndexer {
         tracing::info!("Search index: full reindex complete ({entry_count} entries)");
         Ok(())
     }
-
-    // -----------------------------------------------------------------------
-    // upsert
-    // -----------------------------------------------------------------------
 
     async fn upsert(&self, rel_path: &str) -> anyhow::Result<()> {
         let abs_path = self.canonical_root.join(rel_path);
@@ -280,10 +239,6 @@ impl SearchIndex for SearchIndexer {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // remove
-    // -----------------------------------------------------------------------
-
     async fn remove(&self, rel_path: &str) -> anyhow::Result<()> {
         let rel_path = rel_path.to_string();
         let conn = self
@@ -302,16 +257,8 @@ impl SearchIndex for SearchIndexer {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // remove_prefix
-    // -----------------------------------------------------------------------
-
     async fn remove_prefix(&self, rel_prefix: &str) -> anyhow::Result<()> {
         let exact = rel_prefix.to_string();
-        // Escape metacharacters so directory names containing `%` or `_` are
-        // treated as literals.  The Rust string `{}/\\%` produces the SQL
-        // pattern `<escaped>/\%`, which with `ESCAPE '\'` matches only true
-        // children of the directory.
         let like_pattern = format!("{}/\\%", escape_like(rel_prefix));
         let conn = self
             .db
@@ -332,15 +279,9 @@ impl SearchIndex for SearchIndexer {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // rename_prefix
-    // -----------------------------------------------------------------------
-
     async fn rename_prefix(&self, old: &str, new: &str) -> anyhow::Result<()> {
         let old = old.to_string();
         let new = new.to_string();
-        // Escape metacharacters so that directory names containing `%` or `_`
-        // are treated as literals when building the children LIKE pattern.
         let escaped_old = escape_like(&old);
 
         let conn = self
@@ -355,15 +296,11 @@ impl SearchIndex for SearchIndexer {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
 
-            // Update the exact path.
             conn.execute(
                 "UPDATE file_index SET path = ?1, name = ?2 WHERE path = ?3",
                 params![new, new_name, old],
             )?;
 
-            // Update children: replace the old prefix with new.
-            // The Rust string `{}/\\%` produces the SQL pattern `<escaped>/\%`,
-            // which with `ESCAPE '\'` matches only true children of `old`.
             let children_pattern = format!("{}/\\%", escaped_old);
             let old_prefix_len = old.len() as i64;
 
@@ -382,10 +319,6 @@ impl SearchIndex for SearchIndexer {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // search
-    // -----------------------------------------------------------------------
-
     async fn search(&self, query: SearchQuery) -> anyhow::Result<SearchResults> {
         let conn = self
             .db
@@ -400,17 +333,14 @@ impl SearchIndex for SearchIndexer {
         let escaped_q = escape_like(&query.q);
 
         conn.interact(move |conn| {
-            // Build dynamic WHERE conditions and parameter list.
             let mut conditions: Vec<String> = Vec::new();
             let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
-            // ?1 — the search term (used in WHERE and ORDER BY)
             param_values.push(Box::new(escaped_q.clone()));
             conditions.push("name LIKE ('%' || ?1 || '%') ESCAPE '\\' COLLATE NOCASE".to_string());
 
             let mut next_param = 2u32;
 
-            // File type filter
             if let Some(ref ft) = query.file_type {
                 match ft {
                     FileType::Image => {
@@ -439,35 +369,30 @@ impl SearchIndex for SearchIndexer {
                 }
             }
 
-            // min_size
             if let Some(min) = query.min_size {
                 conditions.push(format!("size >= ?{next_param}"));
                 param_values.push(Box::new(min as i64));
                 next_param += 1;
             }
 
-            // max_size
             if let Some(max) = query.max_size {
                 conditions.push(format!("size <= ?{next_param}"));
                 param_values.push(Box::new(max as i64));
                 next_param += 1;
             }
 
-            // after (modified >= after)
             if let Some(ref after) = query.after {
                 conditions.push(format!("modified >= ?{next_param}"));
                 param_values.push(Box::new(after.clone()));
                 next_param += 1;
             }
 
-            // before (modified <= before)
             if let Some(ref before) = query.before {
                 conditions.push(format!("modified <= ?{next_param}"));
                 param_values.push(Box::new(before.clone()));
                 next_param += 1;
             }
 
-            // path scope
             if let Some(ref scope) = query.path {
                 conditions.push(format!("path LIKE ?{next_param}"));
                 param_values.push(Box::new(format!("{scope}/%")));
@@ -476,7 +401,6 @@ impl SearchIndex for SearchIndexer {
 
             let where_clause = conditions.join(" AND ");
 
-            // COUNT query
             let count_sql = format!("SELECT COUNT(*) FROM file_index WHERE {where_clause}");
 
             let params_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -488,7 +412,6 @@ impl SearchIndex for SearchIndexer {
                 |row| row.get::<_, i64>(0),
             )? as usize;
 
-            // Results query with ordering and pagination
             let limit_param_idx = next_param;
             let offset_param_idx = next_param + 1;
 
@@ -506,7 +429,6 @@ impl SearchIndex for SearchIndexer {
                  LIMIT ?{limit_param_idx} OFFSET ?{offset_param_idx}"
             );
 
-            // Extend params with limit and offset
             param_values.push(Box::new(limit as i64));
             param_values.push(Box::new(offset as i64));
 
@@ -553,10 +475,6 @@ impl SearchIndex for SearchIndexer {
         .map_err(|e: rusqlite::Error| anyhow::anyhow!("search query error: {e}"))
     }
 }
-
-// ---------------------------------------------------------------------------
-// Filesystem walk helper
-// ---------------------------------------------------------------------------
 
 fn walk_tree(root: &Path) -> anyhow::Result<Vec<IndexEntry>> {
     let mut entries = Vec::new();

@@ -28,8 +28,6 @@ use crate::state::AppState;
 
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
-/// Parse comma-separated trusted proxy IPs into a list of IpAddr.
-/// Returns None if the list is empty (meaning trust all).
 fn parse_trusted_proxies(config_value: &str) -> Option<Vec<IpAddr>> {
     let trimmed = config_value.trim();
     if trimmed.is_empty() {
@@ -46,13 +44,6 @@ fn parse_trusted_proxies(config_value: &str) -> Option<Vec<IpAddr>> {
     }
 }
 
-/// Extract the real client IP address.
-///
-/// When `trusted_proxies` is empty: trusts proxy headers unconditionally
-/// (backwards compatible — assumes a reverse proxy strips spoofed headers).
-///
-/// When `trusted_proxies` is set: only reads X-Forwarded-For / X-Real-IP
-/// if the direct peer address is in the trusted list.
 pub(crate) fn extract_client_ip(
     headers: &axum::http::HeaderMap,
     peer_addr: Option<SocketAddr>,

@@ -259,7 +259,7 @@ async fn remove(
 ) -> Result<Json<MutationResponse>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
-    // Check before delete so we know whether to remove a prefix or single entry.
+    // Need is_dir before delete to choose index removal strategy.
     let is_dir = tokio::fs::metadata(&resolved)
         .await
         .map(|m| m.is_dir())

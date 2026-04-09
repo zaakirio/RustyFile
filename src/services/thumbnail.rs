@@ -4,26 +4,12 @@ use std::sync::Arc;
 
 use tokio::sync::Semaphore;
 
-/// Length of the blake3 hex hash prefix used for cache keys.
 const HASH_PREFIX_LEN: usize = 24;
 
-// ---------------------------------------------------------------------------
-// Trait
-// ---------------------------------------------------------------------------
-
-/// Abstraction over thumbnail generation for testability.
-///
-/// The canonical implementation is [`ThumbWorker`]. In tests you can supply a
-/// mock or stub via `Box<dyn ThumbnailGenerator>`.
 #[async_trait::async_trait]
 pub trait ThumbnailGenerator: Send + Sync {
-    /// Return path to a cached thumbnail, generating one if needed.
     async fn get_or_generate(&self, source: &Path) -> Result<PathBuf, ThumbnailError>;
 }
-
-// ---------------------------------------------------------------------------
-// Concrete implementation
-// ---------------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct ThumbWorker {

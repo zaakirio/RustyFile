@@ -29,7 +29,6 @@ pub struct DirListing {
 }
 
 impl FileEntry {
-    /// Construct a FileEntry from a path and its metadata.
     pub(crate) fn from_path_and_metadata(
         canonical_root: &Path,
         entry_path: &Path,
@@ -82,8 +81,6 @@ impl FileEntry {
     }
 }
 
-/// Resolve user path safely within root. Rejects traversal attempts and
-/// null bytes. `canonical_root` must already be canonicalized.
 pub(crate) fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
     if user_path.as_bytes().contains(&0) {
         return Err(AppError::BadRequest(
@@ -97,8 +94,7 @@ pub(crate) fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<Pat
         ));
     }
 
-    // Only Normal components are kept; RootDir/CurDir/ParentDir/Prefix
-    // are dropped to prevent traversal.
+    // Drop RootDir/CurDir/ParentDir/Prefix to prevent traversal.
     let mut relative = PathBuf::new();
     for component in Path::new(user_path).components() {
         if let Component::Normal(seg) = component {
@@ -108,7 +104,7 @@ pub(crate) fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<Pat
 
     let target = canonical_root.join(&relative);
 
-    // For non-existent paths, canonicalize nearest ancestor then re-append remainder.
+    // Non-existent paths: canonicalize nearest ancestor, re-append remainder.
     let canonical_target = if target.exists() {
         target.canonicalize().map_err(AppError::Io)?
     } else {
@@ -136,7 +132,6 @@ pub(crate) fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<Pat
     Ok(canonical_target)
 }
 
-/// `max_items` caps entries to prevent unbounded memory usage on huge directories.
 pub(crate) async fn list_directory(
     canonical_root: &Path,
     dir_path: &Path,
@@ -166,9 +161,7 @@ pub(crate) async fn list_directory(
         ));
     }
 
-    // num_dirs/num_files reflect only the returned (visible) entries.
-    // When truncated, the total entry count is in `total` but the
-    // dir/file breakdown of unreturned entries is unknown.
+    // Counts reflect only returned entries, not truncated ones.
     let num_dirs = items.iter().filter(|e| e.is_dir).count();
     let num_files = items.iter().filter(|e| !e.is_dir).count();
     let truncated = total_count > max_items;
@@ -222,7 +215,6 @@ pub(crate) async fn read_text_content(file_path: &Path) -> Result<String, AppErr
         .map_err(|_| AppError::BadRequest("File appears to be binary, not text".into()))
 }
 
-/// Atomic write: temp file + rename to prevent partial writes.
 pub(crate) async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), AppError> {
     let parent = file_path
         .parent()
@@ -260,7 +252,7 @@ pub(crate) async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), A
 }
 
 pub(crate) async fn create_directory(dir_path: &Path) -> Result<(), AppError> {
-    // Only create a single directory level; parent must exist.
+    // Single level only; parent must exist.
     tokio::fs::create_dir(dir_path)
         .await
         .map_err(|e| match e.kind() {
@@ -296,12 +288,8 @@ pub(crate) async fn delete(canonical_root: &Path, file_path: &Path) -> Result<()
     }
 }
 
-/// Rename (move) a file or directory.
-///
-/// **Note:** The `overwrite=false` check has an inherent TOCTOU race on POSIX:
-/// between `to.exists()` returning false and `fs::rename()` executing, another
-/// process could create a file at `to`. This is a known limitation of path-based
-/// file operations. Use `overwrite=true` when atomic replacement is needed.
+/// TOCTOU: `overwrite=false` has an inherent race between `exists()` and
+/// `rename()`. Use `overwrite=true` when atomic replacement is needed.
 pub(crate) async fn rename(from: &Path, to: &Path, overwrite: bool) -> Result<(), AppError> {
     if let Some(parent) = to.parent() {
         tokio::fs::create_dir_all(parent)

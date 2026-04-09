@@ -15,15 +15,10 @@ use crate::services::search_index::SearchIndexer;
 use crate::services::thumbnail::ThumbWorker;
 use crate::services::transcoder::HlsTranscoder;
 
-/// Maps HLS source keys to their resolved filesystem paths.
 pub type HlsSources = Arc<dashmap::DashMap<String, PathBuf>>;
 
 pub type LoginRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
 
-/// Create a keyed rate limiter that allows `max_attempts` within `window_secs`.
-///
-/// Taking `NonZeroU32` for `max_attempts` makes zero an unrepresentable value,
-/// preventing a panic or divide-by-zero at runtime.
 pub fn new_login_limiter(max_attempts: NonZeroU32, window_secs: u64) -> Arc<LoginRateLimiter> {
     // Use milliseconds to avoid integer division truncating to zero when
     // window_secs < max_attempts (e.g. 60s / 100 attempts = 0s).
@@ -45,22 +40,15 @@ pub struct AppState {
     pub jwt_secret: Vec<u8>,
     pub canonical_root: PathBuf,
     pub login_limiter: Arc<LoginRateLimiter>,
-    /// Pre-hashed dummy password for timing-attack-safe login failures.
+    /// Timing-attack-safe login failures.
     pub dummy_hash: String,
-    /// In-memory directory listing cache (moka).
     pub dir_cache: DirCache,
-    /// Semaphore-limited image thumbnail worker with disk cache.
     pub thumb_worker: ThumbWorker,
-    /// On-demand HLS video transcoder backed by FFmpeg.
     pub transcoder: HlsTranscoder,
-    /// Maps HLS source keys to their resolved filesystem paths.
     pub hls_sources: HlsSources,
-    /// Full-text search index backed by SQLite.
     pub search_indexer: SearchIndexer,
 }
 
-/// Time-limited window for initial admin creation. Closes on admin creation
-/// or timeout, whichever comes first.
 pub struct SetupGuard {
     admin_created: AtomicBool,
     deadline: Instant,

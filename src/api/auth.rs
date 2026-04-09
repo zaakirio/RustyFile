@@ -55,7 +55,6 @@ pub(crate) fn validate_token(token: &str, secret: &[u8]) -> Result<Claims, AppEr
     Ok(token_data.claims)
 }
 
-/// Falls back to `rustyfile_token` cookie if no Authorization header.
 pub(crate) fn extract_token(headers: &HeaderMap) -> Result<String, AppError> {
     if let Some(auth_header) = headers.get("authorization") {
         let auth_str = auth_header
@@ -197,7 +196,6 @@ async fn logout(State(state): State<AppState>) -> impl axum::response::IntoRespo
     )
 }
 
-/// Re-verifies user existence to prevent deleted users from refreshing tokens.
 async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,

@@ -12,10 +12,6 @@ use crate::services::file_ops;
 use crate::services::transcoder::VideoTranscoder;
 use crate::state::AppState;
 
-/// GET /api/hls/playlist/{*path}
-///
-/// Generate and return an HLS m3u8 playlist for the given video file.
-/// Registers the source_key -> path mapping in state for segment lookups.
 async fn playlist(
     State(state): State<AppState>,
     Path(user_path): Path<String>,
@@ -23,7 +19,6 @@ async fn playlist(
 ) -> Result<Response<Body>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
-    // Ensure target is a file.
     let meta = tokio::fs::metadata(&resolved)
         .await
         .map_err(|_| AppError::NotFound("File not found".into()))?;
@@ -36,7 +31,6 @@ async fn playlist(
         .transcoder
         .source_key(&resolved)?;
 
-    // Register the mapping so segment requests can resolve the source path.
     state
         .hls_sources
         .insert(source_key.clone(), resolved.clone());
@@ -54,23 +48,17 @@ async fn playlist(
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 
-/// GET /api/hls/segment/{source_key}/{index}
-///
-/// Serve a single .ts segment for a previously registered HLS source.
-/// The `index` parameter may include a `.ts` suffix which is stripped.
 async fn segment(
     State(state): State<AppState>,
     Path((source_key, index_raw)): Path<(String, String)>,
     Extension(_user): Extension<user_repo::User>,
 ) -> Result<Response<Body>, AppError> {
-    // Strip optional .ts suffix from the index parameter.
     let index_str = index_raw.strip_suffix(".ts").unwrap_or(&index_raw);
 
     let segment_index: u32 = index_str
         .parse()
         .map_err(|_| AppError::BadRequest("Invalid segment index".into()))?;
 
-    // Look up the source path from the registered mapping.
     let source_path = state
         .hls_sources
         .get(&source_key)

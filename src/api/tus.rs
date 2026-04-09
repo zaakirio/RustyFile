@@ -21,7 +21,6 @@ const TUS_RESUMABLE: &str = "1.0.0";
 const TUS_VERSION: &str = "1.0.0";
 const TUS_EXTENSION: &str = "creation,termination";
 
-/// Build TUS protocol routes.
 pub fn routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/", post(create_upload))
@@ -32,13 +31,6 @@ pub fn routes(state: AppState) -> Router<AppState> {
         .layer(middleware::from_fn_with_state(state, require_auth))
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Parse the TUS Upload-Metadata header.
-///
-/// Format: `key1 base64value1,key2 base64value2`
 fn parse_upload_metadata(header_value: &str) -> Vec<(String, String)> {
     header_value
         .split(',')
@@ -61,16 +53,11 @@ fn parse_upload_metadata(header_value: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Return the temp file path for a given upload id.
 fn temp_path(cache_dir: &str, upload_id: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(cache_dir)
         .join("uploads")
         .join(upload_id)
 }
-
-// ---------------------------------------------------------------------------
-// OPTIONS /api/tus/ -- TUS Discovery
-// ---------------------------------------------------------------------------
 
 async fn tus_options() -> impl IntoResponse {
     let mut headers = HeaderMap::new();
@@ -89,16 +76,11 @@ async fn tus_options() -> impl IntoResponse {
     (StatusCode::NO_CONTENT, headers)
 }
 
-// ---------------------------------------------------------------------------
-// POST /api/tus/ -- Create Upload
-// ---------------------------------------------------------------------------
-
 async fn create_upload(
     State(state): State<AppState>,
     headers: HeaderMap,
     axum::Extension(user): axum::Extension<crate::db::user_repo::User>,
 ) -> Result<Response, AppError> {
-    // Read Upload-Length header (required).
     let total_bytes: i64 = headers
         .get("upload-length")
         .and_then(|v| v.to_str().ok())
@@ -111,7 +93,6 @@ async fn create_upload(
         ));
     }
 
-    // Parse Upload-Metadata to extract destination and filename.
     let metadata_str = headers
         .get("upload-metadata")
         .and_then(|v| v.to_str().ok())
@@ -131,7 +112,6 @@ async fn create_upload(
         .map(|(_, v)| v.clone())
         .unwrap_or_default();
 
-    // Validate destination path.
     if !destination.is_empty() {
         file_ops::safe_resolve(&state.canonical_root, &destination)?;
     }
@@ -140,18 +120,15 @@ async fn create_upload(
     let cache_dir = state.config.cache_dir.clone();
     let expiry_hours = state.config.tus_expiry_hours;
 
-    // Create temp file.
     let tmp = temp_path(&cache_dir, &upload_id);
     tokio::fs::create_dir_all(tmp.parent().unwrap())
         .await
         .map_err(AppError::Io)?;
     tokio::fs::File::create(&tmp).await.map_err(AppError::Io)?;
 
-    // Compute expiry.
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(expiry_hours as i64);
     let expires_str = expires_at.to_rfc3339();
 
-    // Insert into SQLite.
     let db = state.db.clone();
     let uid = upload_id.clone();
     let fname = filename.clone();
@@ -176,7 +153,6 @@ async fn create_upload(
     .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
     .map_err(AppError::Database)?;
 
-    // Build response.
     let location = format!("/api/tus/{upload_id}");
     let mut resp_headers = HeaderMap::new();
     resp_headers.insert(
@@ -196,10 +172,6 @@ async fn create_upload(
 
     Ok((StatusCode::CREATED, resp_headers).into_response())
 }
-
-// ---------------------------------------------------------------------------
-// HEAD /api/tus/:id -- Query Offset
-// ---------------------------------------------------------------------------
 
 async fn query_offset(
     State(state): State<AppState>,
@@ -238,15 +210,10 @@ async fn query_offset(
         header::HeaderName::from_static("tus-resumable"),
         HeaderValue::from_static(TUS_RESUMABLE),
     );
-    // Prevent caching of offset queries.
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
 
     Ok((StatusCode::OK, headers).into_response())
 }
-
-// ---------------------------------------------------------------------------
-// PATCH /api/tus/:id -- Append Chunk
-// ---------------------------------------------------------------------------
 
 async fn append_chunk(
     State(state): State<AppState>,
@@ -254,7 +221,6 @@ async fn append_chunk(
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response, AppError> {
-    // Validate Content-Type.
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -266,14 +232,12 @@ async fn append_chunk(
         ));
     }
 
-    // Read Upload-Offset from client.
     let client_offset: i64 = headers
         .get("upload-offset")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
         .ok_or_else(|| AppError::BadRequest("Missing or invalid Upload-Offset header".into()))?;
 
-    // Get current server state.
     let db = state.db.clone();
     let uid = upload_id.clone();
 
@@ -294,12 +258,10 @@ async fn append_chunk(
         .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
         .map_err(|_| AppError::UploadNotFound(upload_id.clone()))?;
 
-    // Validate offset matches.
     if client_offset != received_bytes {
         return Err(AppError::UploadConflict);
     }
 
-    // Collect body bytes.
     let body_bytes = body
         .collect()
         .await
@@ -308,7 +270,6 @@ async fn append_chunk(
 
     let chunk_len = body_bytes.len() as i64;
 
-    // Append to temp file with fsync on a blocking thread.
     let cache_dir = state.config.cache_dir.clone();
     let tmp = temp_path(&cache_dir, &upload_id);
     let tmp_clone = tmp.clone();
@@ -328,7 +289,6 @@ async fn append_chunk(
 
     let new_offset = received_bytes + chunk_len;
 
-    // Update SQLite.
     let db = state.db.clone();
     let uid = upload_id.clone();
     let is_complete = new_offset >= total_bytes;
@@ -349,7 +309,6 @@ async fn append_chunk(
     .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
     .map_err(AppError::Database)?;
 
-    // If upload is complete, move to final destination.
     if is_complete {
         let dest_dir = if destination.is_empty() {
             state.canonical_root.clone()
@@ -359,14 +318,12 @@ async fn append_chunk(
 
         let final_path = dest_dir.join(&filename);
 
-        // Ensure parent directory exists.
         if let Some(parent) = final_path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(AppError::Io)?;
         }
 
-        // Atomic rename from temp to final path.
         tokio::fs::rename(&tmp, &final_path)
             .await
             .map_err(AppError::Io)?;
@@ -379,12 +336,9 @@ async fn append_chunk(
             "TUS upload completed"
         );
 
-        // Invalidate directory cache for the destination.
         let cache_key = dest_dir.to_string_lossy().to_string();
         state.dir_cache.invalidate(&cache_key).await;
 
-        // Update search index for the newly completed upload using the
-        // resolved final path rather than raw user-provided path segments.
         let indexer = state.search_indexer.clone();
         let idx_path = final_path
             .strip_prefix(&state.canonical_root)
@@ -398,7 +352,6 @@ async fn append_chunk(
         });
     }
 
-    // Build response.
     let mut resp_headers = HeaderMap::new();
     resp_headers.insert(
         header::HeaderName::from_static("upload-offset"),
@@ -412,15 +365,10 @@ async fn append_chunk(
     Ok((StatusCode::NO_CONTENT, resp_headers).into_response())
 }
 
-// ---------------------------------------------------------------------------
-// DELETE /api/tus/:id -- Cancel Upload
-// ---------------------------------------------------------------------------
-
 async fn cancel_upload(
     State(state): State<AppState>,
     Path(upload_id): Path<String>,
 ) -> Result<Response, AppError> {
-    // Delete from DB.
     let db = state.db.clone();
     let uid = upload_id.clone();
 
@@ -439,7 +387,6 @@ async fn cancel_upload(
         return Err(AppError::UploadNotFound(upload_id));
     }
 
-    // Remove temp file (best effort).
     let tmp = temp_path(&state.config.cache_dir, &upload_id);
     let _ = tokio::fs::remove_file(&tmp).await;
 
@@ -452,11 +399,6 @@ async fn cancel_upload(
     Ok((StatusCode::NO_CONTENT, resp_headers).into_response())
 }
 
-// ---------------------------------------------------------------------------
-// Background cleanup: remove expired incomplete uploads
-// ---------------------------------------------------------------------------
-
-/// Spawn a background task that periodically cleans up expired TUS uploads.
 pub fn spawn_cleanup_task(db: deadpool_sqlite::Pool, cache_dir: String) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
@@ -500,12 +442,10 @@ async fn cleanup_expired(db: &deadpool_sqlite::Pool, cache_dir: &str) -> Result<
     tracing::info!(count = expired_ids.len(), "Cleaning up expired TUS uploads");
 
     for id in &expired_ids {
-        // Remove temp file.
         let tmp = temp_path(cache_dir, id);
         let _ = tokio::fs::remove_file(&tmp).await;
     }
 
-    // Delete from DB.
     let ids = expired_ids.clone();
     let conn = db
         .get()
