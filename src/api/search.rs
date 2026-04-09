@@ -5,7 +5,7 @@ use axum::{Json, Router};
 
 use crate::api::middleware::auth::require_auth;
 use crate::error::AppError;
-use crate::services::search_index::{SearchQuery, SearchResults};
+use crate::services::search_index::{SearchIndex, SearchQuery, SearchResults};
 use crate::state::AppState;
 
 async fn search(

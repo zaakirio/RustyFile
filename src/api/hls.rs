@@ -9,6 +9,7 @@ use crate::api::middleware::auth::require_auth;
 use crate::db::user_repo;
 use crate::error::AppError;
 use crate::services::file_ops;
+use crate::services::transcoder::VideoTranscoder;
 use crate::state::AppState;
 
 /// GET /api/hls/playlist/{*path}
@@ -33,8 +34,7 @@ async fn playlist(
 
     let source_key = state
         .transcoder
-        .source_key(&resolved)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .source_key(&resolved)?;
 
     // Register the mapping so segment requests can resolve the source path.
     state
@@ -44,8 +44,7 @@ async fn playlist(
     let m3u8 = state
         .transcoder
         .playlist(&resolved, &source_key)
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .await?;
 
     Response::builder()
         .status(StatusCode::OK)
@@ -81,8 +80,7 @@ async fn segment(
     let segment_path = state
         .transcoder
         .segment(&source_path, &source_key, segment_index)
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .await?;
 
     let file = tokio::fs::File::open(&segment_path)
         .await

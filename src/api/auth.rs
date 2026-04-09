@@ -13,14 +13,14 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Claims {
+pub(crate) struct Claims {
     pub sub: i64,
     pub role: String,
     pub exp: u64,
     pub iat: u64,
 }
 
-pub fn create_token(
+pub(crate) fn create_token(
     user_id: i64,
     role: &str,
     secret: &[u8],
@@ -46,7 +46,7 @@ pub fn create_token(
     Ok(token)
 }
 
-pub fn validate_token(token: &str, secret: &[u8]) -> Result<Claims, AppError> {
+pub(crate) fn validate_token(token: &str, secret: &[u8]) -> Result<Claims, AppError> {
     let validation = Validation::default();
 
     let token_data = decode::<Claims>(token, &DecodingKey::from_secret(secret), &validation)
@@ -56,7 +56,7 @@ pub fn validate_token(token: &str, secret: &[u8]) -> Result<Claims, AppError> {
 }
 
 /// Falls back to `rustyfile_token` cookie if no Authorization header.
-pub fn extract_token(headers: &HeaderMap) -> Result<String, AppError> {
+pub(crate) fn extract_token(headers: &HeaderMap) -> Result<String, AppError> {
     if let Some(auth_header) = headers.get("authorization") {
         let auth_str = auth_header
             .to_str()

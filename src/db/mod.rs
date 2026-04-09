@@ -20,7 +20,7 @@ pub fn create_pool(config: &AppConfig) -> anyhow::Result<Pool> {
     Ok(pool)
 }
 
-pub async fn interact<F, T>(pool: &Pool, f: F) -> Result<T, AppError>
+pub(crate) async fn interact<F, T>(pool: &Pool, f: F) -> Result<T, AppError>
 where
     F: FnOnce(&mut rusqlite::Connection) -> Result<T, rusqlite::Error> + Send + 'static,
     T: Send + 'static,

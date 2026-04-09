@@ -23,8 +23,10 @@ pub enum FileType {
     Document,
 }
 
+const DEFAULT_SEARCH_LIMIT: u32 = 50;
+
 fn default_limit() -> u32 {
-    50
+    DEFAULT_SEARCH_LIMIT
 }
 
 /// Escape SQLite LIKE metacharacters (`%`, `_`, `\`) so the string is treated
@@ -60,7 +62,36 @@ pub struct SearchResults {
 }
 
 // ---------------------------------------------------------------------------
-// SearchIndexer
+// Trait
+// ---------------------------------------------------------------------------
+
+/// Abstraction over file search indexing for testability.
+///
+/// The canonical implementation is [`SearchIndexer`]. In tests you can supply a
+/// mock or stub via `Box<dyn SearchIndex>`.
+#[async_trait::async_trait]
+pub trait SearchIndex: Send + Sync {
+    /// Execute a search query against the index.
+    async fn search(&self, query: SearchQuery) -> anyhow::Result<SearchResults>;
+
+    /// Walk the entire file tree and rebuild the index from scratch.
+    async fn full_reindex(&self) -> anyhow::Result<()>;
+
+    /// Insert or update a single entry in the index.
+    async fn upsert(&self, rel_path: &str) -> anyhow::Result<()>;
+
+    /// Remove a single entry from the index.
+    async fn remove(&self, rel_path: &str) -> anyhow::Result<()>;
+
+    /// Remove an entry and all its children from the index.
+    async fn remove_prefix(&self, prefix: &str) -> anyhow::Result<()>;
+
+    /// Rename an entry and all its children in the index.
+    async fn rename_prefix(&self, old_prefix: &str, new_prefix: &str) -> anyhow::Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// Concrete implementation
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -84,12 +115,15 @@ impl SearchIndexer {
     pub fn new(db: Pool, canonical_root: PathBuf) -> Self {
         Self { db, canonical_root }
     }
+}
 
+#[async_trait::async_trait]
+impl SearchIndex for SearchIndexer {
     // -----------------------------------------------------------------------
     // full_reindex
     // -----------------------------------------------------------------------
 
-    pub async fn full_reindex(&self) -> anyhow::Result<()> {
+    async fn full_reindex(&self) -> anyhow::Result<()> {
         let root = self.canonical_root.clone();
 
         // Walk the filesystem on a blocking thread.
@@ -108,8 +142,10 @@ impl SearchIndexer {
         conn.interact(move |conn| {
             let tx = conn.transaction()?;
 
-            // Batch insert in chunks of 500.
-            for chunk in entries.chunks(500) {
+            const BATCH_INSERT_SIZE: usize = 500;
+
+            // Batch insert in chunks.
+            for chunk in entries.chunks(BATCH_INSERT_SIZE) {
                 for entry in chunk {
                     tx.execute(
                         "INSERT OR REPLACE INTO file_index \
@@ -161,7 +197,7 @@ impl SearchIndexer {
     // upsert
     // -----------------------------------------------------------------------
 
-    pub async fn upsert(&self, rel_path: &str) -> anyhow::Result<()> {
+    async fn upsert(&self, rel_path: &str) -> anyhow::Result<()> {
         let abs_path = self.canonical_root.join(rel_path);
         let rel_path = rel_path.to_string();
 
@@ -248,7 +284,7 @@ impl SearchIndexer {
     // remove
     // -----------------------------------------------------------------------
 
-    pub async fn remove(&self, rel_path: &str) -> anyhow::Result<()> {
+    async fn remove(&self, rel_path: &str) -> anyhow::Result<()> {
         let rel_path = rel_path.to_string();
         let conn = self
             .db
@@ -270,7 +306,7 @@ impl SearchIndexer {
     // remove_prefix
     // -----------------------------------------------------------------------
 
-    pub async fn remove_prefix(&self, rel_prefix: &str) -> anyhow::Result<()> {
+    async fn remove_prefix(&self, rel_prefix: &str) -> anyhow::Result<()> {
         let exact = rel_prefix.to_string();
         // Escape metacharacters so directory names containing `%` or `_` are
         // treated as literals.  The Rust string `{}/\\%` produces the SQL
@@ -300,7 +336,7 @@ impl SearchIndexer {
     // rename_prefix
     // -----------------------------------------------------------------------
 
-    pub async fn rename_prefix(&self, old: &str, new: &str) -> anyhow::Result<()> {
+    async fn rename_prefix(&self, old: &str, new: &str) -> anyhow::Result<()> {
         let old = old.to_string();
         let new = new.to_string();
         // Escape metacharacters so that directory names containing `%` or `_`
@@ -350,7 +386,7 @@ impl SearchIndexer {
     // search
     // -----------------------------------------------------------------------
 
-    pub async fn search(&self, query: SearchQuery) -> anyhow::Result<SearchResults> {
+    async fn search(&self, query: SearchQuery) -> anyhow::Result<SearchResults> {
         let conn = self
             .db
             .get()

@@ -15,6 +15,9 @@ use crate::services::search_index::SearchIndexer;
 use crate::services::thumbnail::ThumbWorker;
 use crate::services::transcoder::HlsTranscoder;
 
+/// Maps HLS source keys to their resolved filesystem paths.
+pub type HlsSources = Arc<dashmap::DashMap<String, PathBuf>>;
+
 pub type LoginRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
 
 /// Create a keyed rate limiter that allows `max_attempts` within `window_secs`.
@@ -51,7 +54,7 @@ pub struct AppState {
     /// On-demand HLS video transcoder backed by FFmpeg.
     pub transcoder: HlsTranscoder,
     /// Maps HLS source keys to their resolved filesystem paths.
-    pub hls_sources: Arc<dashmap::DashMap<String, PathBuf>>,
+    pub hls_sources: HlsSources,
     /// Full-text search index backed by SQLite.
     pub search_indexer: SearchIndexer,
 }

@@ -4,6 +4,38 @@ use std::sync::Arc;
 
 use tokio::sync::Semaphore;
 
+/// Length of the blake3 hex hash prefix used for cache keys.
+const HASH_PREFIX_LEN: usize = 24;
+
+// ---------------------------------------------------------------------------
+// Trait
+// ---------------------------------------------------------------------------
+
+/// Abstraction over video transcoding for testability.
+///
+/// The canonical implementation is [`HlsTranscoder`]. In tests you can supply a
+/// mock or stub via `Box<dyn VideoTranscoder>`.
+#[async_trait::async_trait]
+pub trait VideoTranscoder: Send + Sync {
+    /// Compute a stable cache key for a source video.
+    fn source_key(&self, source: &Path) -> Result<String, TranscodeError>;
+
+    /// Generate an HLS m3u8 playlist for the given source video.
+    async fn playlist(&self, source: &Path, source_key: &str) -> Result<String, TranscodeError>;
+
+    /// Generate (or return cached) a single .ts segment for the given source video.
+    async fn segment(
+        &self,
+        source: &Path,
+        source_key: &str,
+        segment_index: u32,
+    ) -> Result<PathBuf, TranscodeError>;
+}
+
+// ---------------------------------------------------------------------------
+// Concrete implementation
+// ---------------------------------------------------------------------------
+
 /// On-demand HLS transcoder backed by FFmpeg subprocesses.
 ///
 /// Probes video duration with `ffprobe`, generates m3u8 playlists dynamically,
@@ -63,9 +95,11 @@ impl HlsTranscoder {
 
         Ok(duration)
     }
+}
 
-    /// Compute a stable cache key for a source video (blake3 hash of path + mtime).
-    pub fn source_key(&self, source: &Path) -> Result<String, TranscodeError> {
+#[async_trait::async_trait]
+impl VideoTranscoder for HlsTranscoder {
+    fn source_key(&self, source: &Path) -> Result<String, TranscodeError> {
         let meta = std::fs::metadata(source).map_err(|_| TranscodeError::IoError)?;
 
         let mtime = meta
@@ -79,11 +113,10 @@ impl HlsTranscoder {
         hasher.update(source.to_string_lossy().as_bytes());
         hasher.update(&mtime.to_le_bytes());
 
-        Ok(hasher.finalize().to_hex()[..24].to_string())
+        Ok(hasher.finalize().to_hex()[..HASH_PREFIX_LEN].to_string())
     }
 
-    /// Generate an HLS m3u8 playlist for the given source video.
-    pub async fn playlist(
+    async fn playlist(
         &self,
         source: &Path,
         source_key: &str,
@@ -116,8 +149,7 @@ impl HlsTranscoder {
         Ok(m3u8)
     }
 
-    /// Generate (or return cached) a single .ts segment for the given source video.
-    pub async fn segment(
+    async fn segment(
         &self,
         source: &Path,
         source_key: &str,

@@ -7,6 +7,7 @@ use tracing_subscriber::EnvFilter;
 use rustyfile::api;
 use rustyfile::config::AppConfig;
 use rustyfile::db;
+use rustyfile::services::search_index::SearchIndex;
 use rustyfile::state::{AppState, SetupGuard};
 
 #[tokio::main]

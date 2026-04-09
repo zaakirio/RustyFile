@@ -30,7 +30,7 @@ pub struct DirListing {
 
 impl FileEntry {
     /// Construct a FileEntry from a path and its metadata.
-    pub fn from_path_and_metadata(
+    pub(crate) fn from_path_and_metadata(
         canonical_root: &Path,
         entry_path: &Path,
         metadata: &std::fs::Metadata,
@@ -84,7 +84,7 @@ impl FileEntry {
 
 /// Resolve user path safely within root. Rejects traversal attempts and
 /// null bytes. `canonical_root` must already be canonicalized.
-pub fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
+pub(crate) fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, AppError> {
     if user_path.as_bytes().contains(&0) {
         return Err(AppError::BadRequest(
             "Invalid path: null bytes not allowed".into(),
@@ -137,7 +137,7 @@ pub fn safe_resolve(canonical_root: &Path, user_path: &str) -> Result<PathBuf, A
 }
 
 /// `max_items` caps entries to prevent unbounded memory usage on huge directories.
-pub async fn list_directory(
+pub(crate) async fn list_directory(
     canonical_root: &Path,
     dir_path: &Path,
     max_items: usize,
@@ -189,7 +189,7 @@ pub async fn list_directory(
     })
 }
 
-pub async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
+pub(crate) async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEntry, AppError> {
     let metadata = tokio::fs::metadata(file_path).await.map_err(|_| {
         let rel = file_path
             .strip_prefix(canonical_root)
@@ -203,7 +203,7 @@ pub async fn file_info(canonical_root: &Path, file_path: &Path) -> Result<FileEn
     ))
 }
 
-pub async fn read_text_content(file_path: &Path) -> Result<String, AppError> {
+pub(crate) async fn read_text_content(file_path: &Path) -> Result<String, AppError> {
     const MAX_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
 
     let metadata = tokio::fs::metadata(file_path)
@@ -223,7 +223,7 @@ pub async fn read_text_content(file_path: &Path) -> Result<String, AppError> {
 }
 
 /// Atomic write: temp file + rename to prevent partial writes.
-pub async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), AppError> {
+pub(crate) async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), AppError> {
     let parent = file_path
         .parent()
         .ok_or_else(|| AppError::BadRequest("Invalid file path".into()))?;
@@ -259,7 +259,7 @@ pub async fn write_file(file_path: &Path, content: &[u8]) -> Result<(), AppError
     Ok(())
 }
 
-pub async fn create_directory(dir_path: &Path) -> Result<(), AppError> {
+pub(crate) async fn create_directory(dir_path: &Path) -> Result<(), AppError> {
     // Only create a single directory level; parent must exist.
     tokio::fs::create_dir(dir_path)
         .await
@@ -274,7 +274,7 @@ pub async fn create_directory(dir_path: &Path) -> Result<(), AppError> {
         })
 }
 
-pub async fn delete(canonical_root: &Path, file_path: &Path) -> Result<(), AppError> {
+pub(crate) async fn delete(canonical_root: &Path, file_path: &Path) -> Result<(), AppError> {
     if file_path == canonical_root {
         return Err(AppError::Forbidden(
             "Cannot delete the root directory".into(),
@@ -302,7 +302,7 @@ pub async fn delete(canonical_root: &Path, file_path: &Path) -> Result<(), AppEr
 /// between `to.exists()` returning false and `fs::rename()` executing, another
 /// process could create a file at `to`. This is a known limitation of path-based
 /// file operations. Use `overwrite=true` when atomic replacement is needed.
-pub async fn rename(from: &Path, to: &Path, overwrite: bool) -> Result<(), AppError> {
+pub(crate) async fn rename(from: &Path, to: &Path, overwrite: bool) -> Result<(), AppError> {
     if let Some(parent) = to.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -321,7 +321,7 @@ pub async fn rename(from: &Path, to: &Path, overwrite: bool) -> Result<(), AppEr
         })
 }
 
-pub async fn detect_subtitles(video_path: PathBuf) -> Vec<String> {
+pub(crate) async fn detect_subtitles(video_path: PathBuf) -> Vec<String> {
     tokio::task::spawn_blocking(move || detect_subtitles_sync(&video_path))
         .await
         .unwrap_or_default()

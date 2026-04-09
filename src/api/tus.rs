@@ -13,6 +13,7 @@ use std::io::Write;
 
 use crate::api::middleware::auth::require_auth;
 use crate::error::AppError;
+use crate::services::search_index::SearchIndex;
 use crate::services::file_ops;
 use crate::state::AppState;
 

@@ -56,6 +56,18 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
+impl From<crate::services::transcoder::TranscodeError> for AppError {
+    fn from(err: crate::services::transcoder::TranscodeError) -> Self {
+        Self::Internal(err.to_string())
+    }
+}
+
+impl From<crate::services::thumbnail::ThumbnailError> for AppError {
+    fn from(err: crate::services::thumbnail::ThumbnailError) -> Self {
+        Self::Internal(err.to_string())
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
