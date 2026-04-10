@@ -31,7 +31,8 @@ async fn playlist(
 
     state
         .hls_sources
-        .insert(source_key.clone(), resolved.clone());
+        .insert(source_key.clone(), resolved.clone())
+        .await;
 
     let m3u8 = state.transcoder.playlist(&resolved, &source_key).await?;
 
@@ -57,7 +58,7 @@ async fn segment(
     let source_path = state
         .hls_sources
         .get(&source_key)
-        .map(|entry| entry.value().clone())
+        .await
         .ok_or_else(|| AppError::NotFound("Unknown HLS source".into()))?;
 
     let segment_path = state

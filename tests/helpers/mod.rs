@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use dashmap::DashMap;
 use reqwest::Client;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -84,7 +83,15 @@ impl TestApp {
         let hls_dir = data_dir.path().join("cache").join("hls");
         std::fs::create_dir_all(&hls_dir).expect("Failed to create HLS cache dir");
         let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
-        let hls_sources: Arc<DashMap<String, std::path::PathBuf>> = Arc::new(DashMap::new());
+        let hls_sources = moka::future::Cache::builder()
+            .max_capacity(100)
+            .time_to_idle(std::time::Duration::from_secs(300))
+            .build();
+
+        let token_blocklist = moka::future::Cache::builder()
+            .max_capacity(1000)
+            .time_to_live(std::time::Duration::from_secs(2 * 3600))
+            .build();
 
         let search_indexer = SearchIndexer::new(pool.clone(), canonical_root.clone());
         let search_indexer_for_test = search_indexer.clone();
@@ -102,6 +109,7 @@ impl TestApp {
             transcoder,
             hls_sources,
             search_indexer,
+            token_blocklist,
         };
 
         let app = build_router(state);

@@ -82,8 +82,18 @@ async fn main() -> anyhow::Result<()> {
         .join("hls");
     tokio::fs::create_dir_all(&hls_dir).await?;
     let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
-    let hls_sources: Arc<dashmap::DashMap<String, std::path::PathBuf>> =
-        Arc::new(dashmap::DashMap::new());
+    let hls_sources: moka::future::Cache<String, std::path::PathBuf> =
+        moka::future::Cache::builder()
+            .max_capacity(1000)
+            .time_to_idle(std::time::Duration::from_secs(2 * 60 * 60))
+            .build();
+
+    let token_blocklist: moka::future::Cache<String, ()> = moka::future::Cache::builder()
+        .max_capacity(10_000)
+        .time_to_live(std::time::Duration::from_secs(
+            config.jwt_expiry_hours * 3600,
+        ))
+        .build();
 
     let search_indexer =
         rustyfile::services::search_index::SearchIndexer::new(pool.clone(), canonical_root.clone());
@@ -101,6 +111,7 @@ async fn main() -> anyhow::Result<()> {
         transcoder,
         hls_sources,
         search_indexer,
+        token_blocklist,
     };
 
     {

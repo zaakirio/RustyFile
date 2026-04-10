@@ -394,8 +394,8 @@ impl SearchIndex for SearchIndexer {
             }
 
             if let Some(ref scope) = query.path {
-                conditions.push(format!("path LIKE ?{next_param}"));
-                param_values.push(Box::new(format!("{scope}/%")));
+                conditions.push(format!("path LIKE ?{next_param} ESCAPE '\\'"));
+                param_values.push(Box::new(format!("{}/%", escape_like(scope))));
                 next_param += 1;
             }
 

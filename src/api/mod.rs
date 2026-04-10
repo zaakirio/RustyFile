@@ -102,7 +102,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let tus_routes = Router::new()
         .nest("/tus", tus::routes(state.clone()))
-        .layer(DefaultBodyLimit::disable());
+        .layer(DefaultBodyLimit::max(max_upload));
 
     let thumb_routes = Router::new().nest("/thumbs", thumbs::routes(state.clone()));
 
@@ -141,6 +141,12 @@ pub fn build_router(state: AppState) -> Router {
         .layer(SetResponseHeaderLayer::overriding(
             header::HeaderName::from_static("permissions-policy"),
             HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'",
+            ),
         ))
     };
 
@@ -197,8 +203,10 @@ fn build_cors_layer(origins_config: &str) -> CorsLayer {
         ]);
 
     let trimmed = origins_config.trim();
-    if trimmed == "*" || trimmed.is_empty() {
+    if trimmed == "*" {
         base.allow_origin(tower_http::cors::Any)
+    } else if trimmed.is_empty() || trimmed == "same-origin" {
+        base.allow_origin(AllowOrigin::list(Vec::<HeaderValue>::new()))
     } else {
         let origins: Vec<HeaderValue> = trimmed
             .split(',')

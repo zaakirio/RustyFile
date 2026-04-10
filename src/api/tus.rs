@@ -21,6 +21,24 @@ const TUS_RESUMABLE: &str = "1.0.0";
 const TUS_VERSION: &str = "1.0.0";
 const TUS_EXTENSION: &str = "creation,termination";
 
+fn sanitize_filename(raw: &str) -> Result<String, AppError> {
+    let name = std::path::Path::new(raw)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    if name.is_empty() || name == "." || name == ".." {
+        return Err(AppError::BadRequest("Invalid filename".into()));
+    }
+
+    if name.as_bytes().contains(&0) {
+        return Err(AppError::BadRequest("Invalid filename: null bytes".into()));
+    }
+
+    Ok(name)
+}
+
 pub fn routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/", post(create_upload))
@@ -93,6 +111,13 @@ async fn create_upload(
         ));
     }
 
+    let max_upload = state.config.max_upload_bytes as i64;
+    if total_bytes > max_upload {
+        return Err(AppError::BadRequest(format!(
+            "Upload-Length {total_bytes} exceeds maximum allowed size {max_upload}"
+        )));
+    }
+
     let metadata_str = headers
         .get("upload-metadata")
         .and_then(|v| v.to_str().ok())
@@ -100,11 +125,13 @@ async fn create_upload(
 
     let metadata = parse_upload_metadata(metadata_str);
 
-    let filename = metadata
+    let raw_filename = metadata
         .iter()
         .find(|(k, _)| k == "filename")
         .map(|(_, v)| v.clone())
         .ok_or_else(|| AppError::BadRequest("Upload-Metadata must include 'filename'".into()))?;
+
+    let filename = sanitize_filename(&raw_filename)?;
 
     let destination = metadata
         .iter()
@@ -317,6 +344,13 @@ async fn append_chunk(
         };
 
         let final_path = dest_dir.join(&filename);
+
+        if !final_path.starts_with(&state.canonical_root) {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(AppError::Forbidden(
+                "Upload destination escapes root directory".into(),
+            ));
+        }
 
         if let Some(parent) = final_path.parent() {
             tokio::fs::create_dir_all(parent)

@@ -158,7 +158,7 @@ fn default_setup_timeout_minutes() -> u64 {
     5
 }
 fn default_cors_origins() -> String {
-    "*".into()
+    "same-origin".into()
 }
 fn default_max_upload_bytes() -> usize {
     50 * 1024 * 1024 // 50 MB

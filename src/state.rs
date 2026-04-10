@@ -15,9 +15,11 @@ use crate::services::search_index::SearchIndexer;
 use crate::services::thumbnail::ThumbWorker;
 use crate::services::transcoder::HlsTranscoder;
 
-pub type HlsSources = Arc<dashmap::DashMap<String, PathBuf>>;
+pub type HlsSources = moka::future::Cache<String, PathBuf>;
 
 pub type LoginRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
+
+pub type TokenBlocklist = moka::future::Cache<String, ()>;
 
 pub fn new_login_limiter(max_attempts: NonZeroU32, window_secs: u64) -> Arc<LoginRateLimiter> {
     // Use milliseconds to avoid integer division truncating to zero when
@@ -47,6 +49,7 @@ pub struct AppState {
     pub transcoder: HlsTranscoder,
     pub hls_sources: HlsSources,
     pub search_indexer: SearchIndexer,
+    pub token_blocklist: TokenBlocklist,
 }
 
 pub struct SetupGuard {
