@@ -19,7 +19,7 @@ pub trait VideoTranscoder: Send + Sync {
 }
 #[derive(Clone)]
 pub struct HlsTranscoder {
-    segment_dir: PathBuf,
+    segment_dir: Arc<PathBuf>,
     semaphore: Arc<Semaphore>,
     segment_duration: u32,
 }
@@ -27,10 +27,15 @@ pub struct HlsTranscoder {
 impl HlsTranscoder {
     pub fn new(segment_dir: PathBuf, max_concurrent: usize, segment_duration: u32) -> Self {
         Self {
-            segment_dir,
+            segment_dir: Arc::new(segment_dir),
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
             segment_duration,
         }
+    }
+
+    /// Returns the segment directory path (for cleanup tasks).
+    pub fn segment_dir(&self) -> &Path {
+        &self.segment_dir
     }
 
     pub async fn probe_duration(&self, source: &Path) -> Result<f64, TranscodeError> {
@@ -193,6 +198,82 @@ impl VideoTranscoder for HlsTranscoder {
 
         Ok(segment_path)
     }
+}
+
+/// Periodically cleans up stale HLS segment directories.
+///
+/// Runs every 30 minutes. Removes subdirectories of `hls_dir` where all files
+/// are older than 2 hours. Respects the given cancellation token for graceful
+/// shutdown.
+pub async fn cleanup_hls_segments(hls_dir: PathBuf, token: tokio_util::sync::CancellationToken) {
+    use std::time::Duration;
+    use tokio::fs;
+
+    let interval_dur = Duration::from_secs(30 * 60);
+    let max_age = Duration::from_secs(2 * 60 * 60);
+
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(interval_dur) => {}
+            _ = token.cancelled() => {
+                tracing::info!("HLS cleanup task shutting down");
+                return;
+            }
+        }
+
+        tracing::debug!("Running HLS segment cleanup");
+        let mut removed = 0u32;
+
+        let Ok(mut entries) = fs::read_dir(&hls_dir).await else {
+            continue;
+        };
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let Ok(ft) = entry.file_type().await else {
+                continue;
+            };
+            if !ft.is_dir() {
+                continue;
+            }
+
+            // Check if all files in this subdirectory are older than max_age.
+            let Ok(all_stale) = check_dir_all_stale(&path, max_age).await else {
+                continue;
+            };
+
+            if all_stale {
+                if let Err(e) = fs::remove_dir_all(&path).await {
+                    tracing::warn!("Failed to remove stale HLS dir {}: {e}", path.display());
+                } else {
+                    removed += 1;
+                }
+            }
+        }
+
+        if removed > 0 {
+            tracing::info!(removed, "HLS segment cleanup complete");
+        }
+    }
+}
+
+async fn check_dir_all_stale(dir: &Path, max_age: std::time::Duration) -> std::io::Result<bool> {
+    use std::time::SystemTime;
+    use tokio::fs;
+
+    let now = SystemTime::now();
+    let mut entries = fs::read_dir(dir).await?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let meta = entry.metadata().await?;
+        let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        if now.duration_since(modified).unwrap_or_default() < max_age {
+            return Ok(false);
+        }
+    }
+
+    // All files are older than max_age, or directory is empty — consider stale.
+    Ok(true)
 }
 
 #[derive(Debug, thiserror::Error)]

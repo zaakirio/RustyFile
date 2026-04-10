@@ -14,7 +14,7 @@ pub async fn require_auth(
     next: Next,
 ) -> Result<Response, AppError> {
     let token = extract_token(request.headers())?;
-    let claims = validate_token(&token, &state.jwt_secret)?;
+    let claims = validate_token(&token, &state.jwt_secret, Some(&state.token_blocklist))?;
 
     let user = user_repo::find_by_id(&state.db, claims.sub)
         .await?

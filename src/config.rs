@@ -58,7 +58,7 @@ struct CliArgs {
     #[arg(long, env = "RUSTYFILE_MAX_LISTING_ITEMS")]
     max_listing_items: Option<usize>,
 
-    /// Trusted proxy IPs for X-Forwarded-For (comma-separated, empty = trust all)
+    /// Trusted proxy IPs for X-Forwarded-For (comma-separated; default: 127.0.0.1)
     #[arg(long, env = "RUSTYFILE_TRUSTED_PROXIES")]
     trusted_proxies: Option<String>,
 
@@ -73,6 +73,14 @@ struct CliArgs {
     /// Set cookie Secure flag (disable for local dev without HTTPS)
     #[arg(long, env = "RUSTYFILE_SECURE_COOKIE")]
     secure_cookie: Option<bool>,
+
+    /// Blocked file extensions for uploads (comma-separated, e.g. ".php,.sh,.exe")
+    #[arg(long, env = "RUSTYFILE_BLOCKED_UPLOAD_EXTENSIONS")]
+    blocked_upload_extensions: Option<String>,
+
+    /// Max API requests per IP per minute for expensive endpoints
+    #[arg(long, env = "RUSTYFILE_API_RATE_LIMIT")]
+    api_rate_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,80 +136,118 @@ pub struct AppConfig {
 
     #[serde(default = "default_secure_cookie")]
     pub secure_cookie: bool,
+
+    /// Comma-separated list of blocked file extensions for uploads (e.g. ".php,.sh,.exe")
+    #[serde(default = "default_blocked_upload_extensions")]
+    pub blocked_upload_extensions: String,
+
+    /// Max API requests per IP per minute for expensive endpoints (search, thumbnails, HLS)
+    #[serde(default = "default_api_rate_limit")]
+    pub api_rate_limit: u32,
 }
 
+// ── Default value constants (single source of truth) ──────────────────────────
+const DEFAULT_HOST: &str = "0.0.0.0";
+const DEFAULT_PORT: u16 = 8080;
+const DEFAULT_ROOT: &str = "./data";
+const DEFAULT_DATA_DIR: &str = "./rustyfile-data";
+const DEFAULT_LOG_LEVEL: &str = "info";
+const DEFAULT_LOG_FORMAT: &str = "pretty";
+const DEFAULT_JWT_EXPIRY_HOURS: u64 = 2;
+const DEFAULT_MIN_PASSWORD_LENGTH: usize = 10;
+const DEFAULT_SETUP_TIMEOUT_MINUTES: u64 = 5;
+const DEFAULT_CORS_ORIGINS: &str = "same-origin";
+const DEFAULT_MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024; // 50 MB
+const DEFAULT_MAX_PASSWORD_LENGTH: usize = 128;
+const DEFAULT_MAX_LISTING_ITEMS: usize = 10_000;
+const DEFAULT_TRUSTED_PROXIES: &str = "127.0.0.1";
+const DEFAULT_CACHE_DIR: &str = "./rustyfile-data/cache";
+const DEFAULT_TUS_EXPIRY_HOURS: u64 = 24;
+const DEFAULT_SECURE_COOKIE: bool = true;
+const DEFAULT_BLOCKED_UPLOAD_EXTENSIONS: &str =
+    ".php,.phtml,.php5,.sh,.bash,.cgi,.pl,.py,.rb,.exe,.bat,.cmd,.ps1,.msi,.dll,.so,.com,.scr,.vbs,.vbe,.wsf,.wsh,.jar";
+const DEFAULT_API_RATE_LIMIT: u32 = 60;
+
 fn default_host() -> String {
-    "0.0.0.0".into()
+    DEFAULT_HOST.into()
 }
 fn default_port() -> u16 {
-    8080
+    DEFAULT_PORT
 }
 fn default_root() -> String {
-    "./data".into()
+    DEFAULT_ROOT.into()
 }
 fn default_data_dir() -> String {
-    "./rustyfile-data".into()
+    DEFAULT_DATA_DIR.into()
 }
 fn default_log_level() -> String {
-    "info".into()
+    DEFAULT_LOG_LEVEL.into()
 }
 fn default_log_format() -> String {
-    "pretty".into()
+    DEFAULT_LOG_FORMAT.into()
 }
 fn default_jwt_expiry_hours() -> u64 {
-    2
+    DEFAULT_JWT_EXPIRY_HOURS
 }
 fn default_min_password_length() -> usize {
-    10
+    DEFAULT_MIN_PASSWORD_LENGTH
 }
 fn default_setup_timeout_minutes() -> u64 {
-    5
+    DEFAULT_SETUP_TIMEOUT_MINUTES
 }
 fn default_cors_origins() -> String {
-    "*".into()
+    DEFAULT_CORS_ORIGINS.into()
 }
 fn default_max_upload_bytes() -> usize {
-    50 * 1024 * 1024 // 50 MB
+    DEFAULT_MAX_UPLOAD_BYTES
 }
 fn default_max_password_length() -> usize {
-    128
+    DEFAULT_MAX_PASSWORD_LENGTH
 }
 fn default_max_listing_items() -> usize {
-    10_000
+    DEFAULT_MAX_LISTING_ITEMS
 }
 fn default_trusted_proxies() -> String {
-    "".into() // Empty = trust all (backwards compatible)
+    DEFAULT_TRUSTED_PROXIES.into()
 }
 fn default_cache_dir() -> String {
-    "./rustyfile-data/cache".into()
+    DEFAULT_CACHE_DIR.into()
 }
 fn default_tus_expiry_hours() -> u64 {
-    24
+    DEFAULT_TUS_EXPIRY_HOURS
 }
 fn default_secure_cookie() -> bool {
-    true
+    DEFAULT_SECURE_COOKIE
+}
+fn default_blocked_upload_extensions() -> String {
+    DEFAULT_BLOCKED_UPLOAD_EXTENSIONS.into()
+}
+fn default_api_rate_limit() -> u32 {
+    DEFAULT_API_RATE_LIMIT
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            host: default_host(),
-            port: default_port(),
-            root: default_root(),
-            data_dir: default_data_dir(),
-            log_level: default_log_level(),
-            log_format: default_log_format(),
-            jwt_expiry_hours: default_jwt_expiry_hours(),
-            min_password_length: default_min_password_length(),
-            setup_timeout_minutes: default_setup_timeout_minutes(),
-            cors_origins: default_cors_origins(),
-            max_upload_bytes: default_max_upload_bytes(),
-            max_password_length: default_max_password_length(),
-            max_listing_items: default_max_listing_items(),
-            trusted_proxies: default_trusted_proxies(),
-            cache_dir: default_cache_dir(),
-            tus_expiry_hours: default_tus_expiry_hours(),
-            secure_cookie: default_secure_cookie(),
+            host: DEFAULT_HOST.into(),
+            port: DEFAULT_PORT,
+            root: DEFAULT_ROOT.into(),
+            data_dir: DEFAULT_DATA_DIR.into(),
+            log_level: DEFAULT_LOG_LEVEL.into(),
+            log_format: DEFAULT_LOG_FORMAT.into(),
+            jwt_expiry_hours: DEFAULT_JWT_EXPIRY_HOURS,
+            min_password_length: DEFAULT_MIN_PASSWORD_LENGTH,
+            setup_timeout_minutes: DEFAULT_SETUP_TIMEOUT_MINUTES,
+            cors_origins: DEFAULT_CORS_ORIGINS.into(),
+            max_upload_bytes: DEFAULT_MAX_UPLOAD_BYTES,
+            max_password_length: DEFAULT_MAX_PASSWORD_LENGTH,
+            max_listing_items: DEFAULT_MAX_LISTING_ITEMS,
+            trusted_proxies: DEFAULT_TRUSTED_PROXIES.into(),
+            cache_dir: DEFAULT_CACHE_DIR.into(),
+            tus_expiry_hours: DEFAULT_TUS_EXPIRY_HOURS,
+            secure_cookie: DEFAULT_SECURE_COOKIE,
+            blocked_upload_extensions: DEFAULT_BLOCKED_UPLOAD_EXTENSIONS.into(),
+            api_rate_limit: DEFAULT_API_RATE_LIMIT,
         }
     }
 }
@@ -246,6 +292,8 @@ impl AppConfig {
             cache_dir,
             tus_expiry_hours,
             secure_cookie,
+            blocked_upload_extensions,
+            api_rate_limit,
         );
 
         let config: Self = figment.extract()?;

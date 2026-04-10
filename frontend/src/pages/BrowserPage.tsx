@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { Upload, FolderPlus, Refresh, Xmark, Check, NavArrowLeft, NavArrowRight, Trash, Search as SearchIcon } from 'iconoir-react'
+import { api } from '../api/client'
 import { useFiles } from '../hooks/useFiles'
 import { useTusUpload } from '../hooks/useTusUpload'
 import { useDragDrop } from '../hooks/useDragDrop'
@@ -25,6 +26,9 @@ export default function BrowserPage() {
   const { items: uploadItems, addFiles, pauseUpload, resumeUpload, clearCompleted } =
     useTusUpload({ currentPath, onAllComplete: refresh })
   const { isDragging, dragHandlers, uploadFromPicker } = useDragDrop(addFiles)
+
+  // Action error state (surfaced in UI instead of console.error)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Inline delete confirmation state
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
@@ -66,18 +70,26 @@ export default function BrowserPage() {
 
   const bulkDelete = useCallback(async () => {
     if (selected.size === 0) return
+    setActionError(null)
     setBulkDeleting(true)
     try {
-      for (const path of selected) {
-        await deleteItem(path)
-      }
+      const results = await Promise.allSettled(
+        Array.from(selected).map((itemPath) =>
+          api.delete(`/api/fs/${encodeFsPath(itemPath)}`)
+        )
+      )
+      const failed = results.filter((r) => r.status === 'rejected').length
+      await refresh()
       setSelected(new Set())
+      if (failed > 0) {
+        setActionError(`${failed} of ${selected.size} item(s) failed to delete`)
+      }
     } catch (err) {
-      console.error('Bulk delete failed:', err)
+      setActionError(err instanceof Error ? err.message : 'Bulk delete failed')
     } finally {
       setBulkDeleting(false)
     }
-  }, [selected, deleteItem])
+  }, [selected, refresh])
 
   const handleNavigate = useCallback((entry: FileEntry) => {
     const encoded = encodeFsPath(entry.path)
@@ -103,11 +115,12 @@ export default function BrowserPage() {
 
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete) return
+    setActionError(null)
     try {
       await deleteItem(pendingDelete)
       setPendingDelete(null)
     } catch (err) {
-      console.error('Delete failed:', err)
+      setActionError(err instanceof Error ? err.message : 'Failed to delete item')
     }
   }, [pendingDelete, deleteItem])
 
@@ -118,13 +131,14 @@ export default function BrowserPage() {
   const handleCreateDir = useCallback(async () => {
     const name = newFolderName.trim()
     if (!name) return
+    setActionError(null)
     try {
       const dirPath = currentPath ? `${currentPath}/${name}` : name
       await createDir(dirPath)
       setShowNewFolder(false)
       setNewFolderName('')
     } catch (err) {
-      console.error('Create directory failed:', err)
+      setActionError(err instanceof Error ? err.message : 'Failed to create folder')
     }
   }, [currentPath, newFolderName, createDir])
 
@@ -170,6 +184,22 @@ export default function BrowserPage() {
 
       {/* Upload manager */}
       <UploadManager items={uploadItems} onPause={pauseUpload} onResume={resumeUpload} onClear={clearCompleted} />
+
+      {/* Action error banner */}
+      {actionError && (
+        <div className="bg-surface border-b border-borders px-4 py-2.5 flex items-center gap-3">
+          <span className="font-mono text-[12px] text-primary uppercase tracking-widest font-bold flex-1">
+            [ ERROR: {actionError} ]
+          </span>
+          <button
+            onClick={() => setActionError(null)}
+            className="p-1 text-muted hover:text-primary transition-colors shrink-0"
+            title="Dismiss"
+          >
+            <Xmark width={16} height={16} strokeWidth={2} />
+          </button>
+        </div>
+      )}
 
       {/* Inline delete confirmation */}
       {pendingDelete && (

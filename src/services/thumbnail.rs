@@ -14,7 +14,7 @@ pub trait ThumbnailGenerator: Send + Sync {
 #[derive(Clone)]
 pub struct ThumbWorker {
     semaphore: Arc<Semaphore>,
-    cache_dir: PathBuf,
+    cache_dir: Arc<PathBuf>,
     max_dimension: u32,
 }
 
@@ -22,9 +22,14 @@ impl ThumbWorker {
     pub fn new(max_concurrent: usize, cache_dir: PathBuf, max_dimension: u32) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
-            cache_dir,
+            cache_dir: Arc::new(cache_dir),
             max_dimension,
         }
+    }
+
+    /// Returns the cache directory path (for cleanup tasks).
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
     }
 
     async fn cache_key(&self, source: &Path) -> Result<String, ThumbnailError> {
@@ -100,6 +105,59 @@ fn generate_image_thumbnail(
     std::fs::write(output, buf.into_inner()).map_err(|_| ThumbnailError::GenerationFailed)?;
 
     Ok(())
+}
+
+/// Periodically cleans up stale thumbnail cache files.
+///
+/// Runs every 2 hours. Removes `.jpg` files in `thumb_dir` that are older than
+/// 7 days. Respects the given cancellation token for graceful shutdown.
+pub async fn cleanup_thumbnails(thumb_dir: PathBuf, token: tokio_util::sync::CancellationToken) {
+    use std::time::{Duration, SystemTime};
+    use tokio::fs;
+
+    let interval_dur = Duration::from_secs(2 * 60 * 60);
+    let max_age = Duration::from_secs(7 * 24 * 60 * 60);
+
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(interval_dur) => {}
+            _ = token.cancelled() => {
+                tracing::info!("Thumbnail cleanup task shutting down");
+                return;
+            }
+        }
+
+        tracing::debug!("Running thumbnail cleanup");
+        let now = SystemTime::now();
+        let mut removed = 0u32;
+
+        let Ok(mut entries) = fs::read_dir(&thumb_dir).await else {
+            continue;
+        };
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata().await else {
+                continue;
+            };
+            if !meta.is_file() {
+                continue;
+            }
+
+            let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            if now.duration_since(modified).unwrap_or_default() > max_age {
+                if let Err(e) = fs::remove_file(&path).await {
+                    tracing::warn!("Failed to remove stale thumbnail {}: {e}", path.display());
+                } else {
+                    removed += 1;
+                }
+            }
+        }
+
+        if removed > 0 {
+            tracing::info!(removed, "Thumbnail cleanup complete");
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

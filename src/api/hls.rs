@@ -27,11 +27,16 @@ async fn playlist(
         return Err(AppError::BadRequest("Cannot transcode a directory".into()));
     }
 
-    let source_key = state.transcoder.source_key(&resolved)?;
+    let transcoder = state.transcoder.clone();
+    let resolved_for_key = resolved.clone();
+    let source_key = tokio::task::spawn_blocking(move || transcoder.source_key(&resolved_for_key))
+        .await
+        .map_err(|e| AppError::Internal(format!("spawn_blocking join error: {e}")))??;
 
     state
         .hls_sources
-        .insert(source_key.clone(), resolved.clone());
+        .insert(source_key.clone(), resolved.clone())
+        .await;
 
     let m3u8 = state.transcoder.playlist(&resolved, &source_key).await?;
 
@@ -57,7 +62,7 @@ async fn segment(
     let source_path = state
         .hls_sources
         .get(&source_key)
-        .map(|entry| entry.value().clone())
+        .await
         .ok_or_else(|| AppError::NotFound("Unknown HLS source".into()))?;
 
     let segment_path = state

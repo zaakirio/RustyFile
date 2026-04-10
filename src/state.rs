@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,19 +16,19 @@ use crate::services::search_index::SearchIndexer;
 use crate::services::thumbnail::ThumbWorker;
 use crate::services::transcoder::HlsTranscoder;
 
-pub type HlsSources = Arc<dashmap::DashMap<String, PathBuf>>;
+pub type HlsSources = moka::future::Cache<String, PathBuf>;
 
-pub type LoginRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
+pub type IpRateLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
 
-pub fn new_login_limiter(max_attempts: NonZeroU32, window_secs: u64) -> Arc<LoginRateLimiter> {
-    // Use milliseconds to avoid integer division truncating to zero when
-    // window_secs < max_attempts (e.g. 60s / 100 attempts = 0s).
-    let period_ms = (window_secs * 1000) / max_attempts.get() as u64;
+pub type TokenBlocklist = moka::future::Cache<String, ()>;
+
+pub fn new_rate_limiter(max_requests: NonZeroU32, window_secs: u64) -> Arc<IpRateLimiter> {
+    let period_ms = (window_secs * 1000) / max_requests.get() as u64;
     let period = Duration::from_millis(period_ms.max(1));
 
     let quota = Quota::with_period(period)
         .expect("Non-zero rate-limit period")
-        .allow_burst(max_attempts);
+        .allow_burst(max_requests);
 
     Arc::new(RateLimiter::dashmap(quota))
 }
@@ -35,18 +36,22 @@ pub fn new_login_limiter(max_attempts: NonZeroU32, window_secs: u64) -> Arc<Logi
 #[derive(Clone)]
 pub struct AppState {
     pub db: Pool,
-    pub config: AppConfig,
+    pub config: Arc<AppConfig>,
     pub setup_guard: Arc<SetupGuard>,
-    pub jwt_secret: Vec<u8>,
-    pub canonical_root: PathBuf,
-    pub login_limiter: Arc<LoginRateLimiter>,
+    pub jwt_secret: Arc<[u8]>,
+    pub canonical_root: Arc<PathBuf>,
+    pub login_limiter: Arc<IpRateLimiter>,
     /// Timing-attack-safe login failures.
-    pub dummy_hash: String,
+    pub dummy_hash: Arc<str>,
     pub dir_cache: DirCache,
     pub thumb_worker: ThumbWorker,
     pub transcoder: HlsTranscoder,
     pub hls_sources: HlsSources,
     pub search_indexer: SearchIndexer,
+    pub token_blocklist: TokenBlocklist,
+    pub api_limiter: Arc<IpRateLimiter>,
+    /// Pre-parsed set of blocked upload extensions (parsed once at startup).
+    pub blocked_extensions: Arc<HashSet<String>>,
 }
 
 pub struct SetupGuard {

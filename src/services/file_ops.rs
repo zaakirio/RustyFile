@@ -1,9 +1,27 @@
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::error::AppError;
+
+/// Returns `Err` if the filename's extension is in the pre-parsed blocked set.
+pub fn check_blocked_extension(filename: &str, blocked: &HashSet<String>) -> Result<(), AppError> {
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e.to_lowercase()));
+
+    if let Some(ref ext) = ext {
+        if blocked.contains(ext) {
+            return Err(AppError::BadRequest(format!(
+                "File type '{ext}' is not allowed"
+            )));
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {

@@ -18,6 +18,8 @@ pub(crate) struct Claims {
     pub role: String,
     pub exp: u64,
     pub iat: u64,
+    pub iss: String,
+    pub aud: String,
 }
 
 pub(crate) fn create_token(
@@ -34,23 +36,34 @@ pub(crate) fn create_token(
         role: role.to_string(),
         exp,
         iat: now,
+        iss: "rustyfile".to_string(),
+        aud: "rustyfile".to_string(),
     };
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret),
-    )
-    .map_err(|e| AppError::Internal(format!("Token creation error: {e}")))?;
+    let header = Header::new(jsonwebtoken::Algorithm::HS256);
+    let token = encode(&header, &claims, &EncodingKey::from_secret(secret))
+        .map_err(|e| AppError::Internal(format!("Token creation error: {e}")))?;
 
     Ok(token)
 }
 
-pub(crate) fn validate_token(token: &str, secret: &[u8]) -> Result<Claims, AppError> {
-    let validation = Validation::default();
+pub(crate) fn validate_token(
+    token: &str,
+    secret: &[u8],
+    blocklist: Option<&crate::state::TokenBlocklist>,
+) -> Result<Claims, AppError> {
+    if let Some(bl) = blocklist {
+        if bl.contains_key(token) {
+            return Err(AppError::Unauthorized("Token has been revoked".into()));
+        }
+    }
+
+    let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+    validation.set_issuer(&["rustyfile"]);
+    validation.set_audience(&["rustyfile"]);
 
     let token_data = decode::<Claims>(token, &DecodingKey::from_secret(secret), &validation)
-        .map_err(|e| AppError::Unauthorized(format!("Invalid token: {e}")))?;
+        .map_err(|_| AppError::Unauthorized("Invalid or expired token".into()))?;
 
     Ok(token_data.claims)
 }
@@ -90,6 +103,18 @@ pub(crate) fn extract_token(headers: &HeaderMap) -> Result<String, AppError> {
     ))
 }
 
+pub(crate) fn build_auth_cookie(token: &str, jwt_expiry_hours: u64, secure: bool) -> String {
+    let mut cookie = format!(
+        "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        token,
+        jwt_expiry_hours * 3600
+    );
+    if secure {
+        cookie.push_str("; Secure");
+    }
+    cookie
+}
+
 #[derive(Debug, Deserialize)]
 struct LoginRequest {
     username: String,
@@ -98,13 +123,11 @@ struct LoginRequest {
 
 #[derive(Debug, Serialize)]
 struct AuthResponse {
-    token: String,
     user: user_repo::User,
 }
 
 #[derive(Debug, Serialize)]
 struct RefreshResponse {
-    token: String,
     user: user_repo::User,
 }
 
@@ -152,22 +175,16 @@ async fn login(
                 state.config.jwt_expiry_hours,
             )?;
 
-            let mut cookie = format!(
-                "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-                token,
-                state.config.jwt_expiry_hours * 3600
+            let cookie = build_auth_cookie(
+                &token,
+                state.config.jwt_expiry_hours,
+                state.config.secure_cookie,
             );
-            if state.config.secure_cookie {
-                cookie.push_str("; Secure");
-            }
 
             Ok((
                 StatusCode::OK,
                 [(axum::http::header::SET_COOKIE, cookie)],
-                Json(AuthResponse {
-                    token: token.clone(),
-                    user,
-                }),
+                Json(AuthResponse { user }),
             ))
         }
         None => {
@@ -182,7 +199,14 @@ async fn login(
     }
 }
 
-async fn logout(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl axum::response::IntoResponse {
+    if let Ok(token) = extract_token(&headers) {
+        state.token_blocklist.insert(token, ()).await;
+    }
+
     let mut clear_cookie =
         "rustyfile_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0".to_string();
     if state.config.secure_cookie {
@@ -199,9 +223,9 @@ async fn logout(State(state): State<AppState>) -> impl axum::response::IntoRespo
 async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<RefreshResponse>, AppError> {
+) -> Result<impl axum::response::IntoResponse, AppError> {
     let token = extract_token(&headers)?;
-    let claims = validate_token(&token, &state.jwt_secret)?;
+    let claims = validate_token(&token, &state.jwt_secret, Some(&state.token_blocklist))?;
 
     let user = user_repo::find_by_id(&state.db, claims.sub)
         .await?
@@ -214,10 +238,18 @@ async fn refresh(
         state.config.jwt_expiry_hours,
     )?;
 
-    Ok(Json(RefreshResponse {
-        token: new_token,
-        user,
-    }))
+    state.token_blocklist.insert(token, ()).await;
+
+    let cookie = build_auth_cookie(
+        &new_token,
+        state.config.jwt_expiry_hours,
+        state.config.secure_cookie,
+    );
+
+    Ok((
+        [(axum::http::header::SET_COOKIE, cookie)],
+        Json(RefreshResponse { user }),
+    ))
 }
 
 pub fn routes() -> Router<AppState> {

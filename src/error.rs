@@ -83,19 +83,19 @@ impl From<crate::services::thumbnail::ThumbnailError> for AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message) = match &self {
-            Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
-            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            Self::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
-            Self::UploadNotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+        let (status, message) = match self {
+            Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
+            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
+            Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+            Self::Conflict(msg) => (StatusCode::CONFLICT, msg),
+            Self::UploadNotFound(msg) => (StatusCode::NOT_FOUND, msg),
             Self::UploadConflict => (StatusCode::CONFLICT, "Upload offset mismatch".into()),
             Self::SetupRequired => (StatusCode::PRECONDITION_REQUIRED, "Setup required".into()),
             Self::SetupExpired => (StatusCode::GONE, "Setup window expired".into()),
             Self::TooManyRequests(msg) => {
                 tracing::warn!("Rate limited: {msg}");
-                (StatusCode::TOO_MANY_REQUESTS, msg.clone())
+                (StatusCode::TOO_MANY_REQUESTS, msg)
             }
             Self::Internal(msg) => {
                 tracing::error!("Internal error: {msg}");

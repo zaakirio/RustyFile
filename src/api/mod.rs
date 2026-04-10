@@ -16,7 +16,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::get;
-use axum::Router;
+use axum::{middleware as axum_mw, Router};
 use tower::timeout::TimeoutLayer;
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
@@ -88,7 +88,13 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/health", health::routes())
         .nest("/setup", setup::routes())
         .nest("/auth", auth::routes())
-        .nest("/fs/search", search::routes(state.clone()))
+        .nest(
+            "/fs/search",
+            search::routes(state.clone()).route_layer(axum_mw::from_fn_with_state(
+                state.clone(),
+                middleware::rate_limit::api_rate_limit,
+            )),
+        )
         .nest("/fs", files::routes(state.clone()))
         // Axum nest doesn't match trailing slash.
         .route("/fs/", get(|| async { Redirect::permanent("/api/fs") }))
@@ -102,11 +108,21 @@ pub fn build_router(state: AppState) -> Router {
 
     let tus_routes = Router::new()
         .nest("/tus", tus::routes(state.clone()))
-        .layer(DefaultBodyLimit::disable());
+        .layer(DefaultBodyLimit::max(max_upload));
 
-    let thumb_routes = Router::new().nest("/thumbs", thumbs::routes(state.clone()));
+    let thumb_routes = Router::new()
+        .nest("/thumbs", thumbs::routes(state.clone()))
+        .route_layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            middleware::rate_limit::api_rate_limit,
+        ));
 
-    let hls_routes = Router::new().nest("/hls", hls::routes(state.clone()));
+    let hls_routes = Router::new()
+        .nest("/hls", hls::routes(state.clone()))
+        .route_layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            middleware::rate_limit::api_rate_limit,
+        ));
 
     let cors = build_cors_layer(&state.config.cors_origins);
 
@@ -121,27 +137,39 @@ pub fn build_router(state: AppState) -> Router {
             )
         });
 
-    let security_headers = |r: Router| {
-        r.layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("x-frame-options"),
-            HeaderValue::from_static("DENY"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("x-content-type-options"),
-            HeaderValue::from_static("nosniff"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("x-xss-protection"),
-            HeaderValue::from_static("1; mode=block"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("referrer-policy"),
-            HeaderValue::from_static("strict-origin-when-cross-origin"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::HeaderName::from_static("permissions-policy"),
-            HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
-        ))
+    let secure_cookie = state.config.secure_cookie;
+    let security_headers = move |r: Router| {
+        let r = r
+            .layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("x-frame-options"),
+                HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("x-content-type-options"),
+                HeaderValue::from_static("nosniff"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("referrer-policy"),
+                HeaderValue::from_static("strict-origin-when-cross-origin"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("permissions-policy"),
+                HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+            ))
+            .layer(SetResponseHeaderLayer::if_not_present(
+                header::HeaderName::from_static("content-security-policy"),
+                HeaderValue::from_static(
+                    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; font-src 'self' https://fonts.gstatic.com; object-src 'none'; frame-ancestors 'none'",
+                ),
+            ));
+        if secure_cookie {
+            r.layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("strict-transport-security"),
+                HeaderValue::from_static("max-age=63072000; includeSubDomains"),
+            ))
+        } else {
+            r
+        }
     };
 
     let timeout_layer = ServiceBuilder::new()
@@ -197,8 +225,10 @@ fn build_cors_layer(origins_config: &str) -> CorsLayer {
         ]);
 
     let trimmed = origins_config.trim();
-    if trimmed == "*" || trimmed.is_empty() {
+    if trimmed == "*" {
         base.allow_origin(tower_http::cors::Any)
+    } else if trimmed.is_empty() || trimmed == "same-origin" {
+        base.allow_origin(AllowOrigin::list(Vec::<HeaderValue>::new()))
     } else {
         let origins: Vec<HeaderValue> = trimmed
             .split(',')

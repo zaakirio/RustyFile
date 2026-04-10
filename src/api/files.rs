@@ -104,12 +104,16 @@ async fn browse(
             })
             .await;
 
-        let mut listing = (*cached).clone();
-
+        // Sort via an index vector to avoid deep-cloning the entire DirListing.
+        let items = &cached.items;
         let sort_field = &query.sort;
         let ascending = query.order.as_deref().unwrap_or("asc") != "desc";
 
-        listing.items.sort_by(|a, b| {
+        let mut indices: Vec<usize> = (0..items.len()).collect();
+        indices.sort_by(|&i, &j| {
+            let a = &items[i];
+            let b = &items[j];
+
             match (a.is_dir, b.is_dir) {
                 (true, false) => return std::cmp::Ordering::Less,
                 (false, true) => return std::cmp::Ordering::Greater,
@@ -136,9 +140,19 @@ async fn browse(
             }
         });
 
-        Ok(Json(
-            serde_json::to_value(&listing).map_err(AppError::Json)?,
-        ))
+        let sorted_items: Vec<&file_ops::FileEntry> = indices.iter().map(|&i| &items[i]).collect();
+
+        // Build response JSON directly from the Arc without cloning the listing.
+        let response = serde_json::json!({
+            "path": cached.path,
+            "items": sorted_items,
+            "num_dirs": cached.num_dirs,
+            "num_files": cached.num_files,
+            "total": cached.total,
+            "truncated": cached.truncated,
+        });
+
+        Ok(Json(response))
     } else {
         let entry = file_ops::file_info(&state.canonical_root, &resolved).await?;
 
@@ -200,6 +214,11 @@ async fn save_file(
     body: axum::body::Bytes,
 ) -> Result<(StatusCode, Json<MutationResponse>), AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
+
+    // Check blocked file extensions.
+    if let Some(name) = resolved.file_name().and_then(|n| n.to_str()) {
+        file_ops::check_blocked_extension(name, &state.blocked_extensions)?;
+    }
 
     file_ops::write_file(&resolved, &body).await?;
 

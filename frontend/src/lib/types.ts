@@ -39,7 +39,6 @@ export interface FileInfo {
 export type FsResponse = DirListing | FileInfo
 
 export interface AuthResponse {
-  token: string
   user: User
 }
 
