@@ -58,7 +58,7 @@ struct CliArgs {
     #[arg(long, env = "RUSTYFILE_MAX_LISTING_ITEMS")]
     max_listing_items: Option<usize>,
 
-    /// Trusted proxy IPs for X-Forwarded-For (comma-separated, empty = trust all)
+    /// Trusted proxy IPs for X-Forwarded-For (comma-separated; default: 127.0.0.1)
     #[arg(long, env = "RUSTYFILE_TRUSTED_PROXIES")]
     trusted_proxies: Option<String>,
 
@@ -73,6 +73,14 @@ struct CliArgs {
     /// Set cookie Secure flag (disable for local dev without HTTPS)
     #[arg(long, env = "RUSTYFILE_SECURE_COOKIE")]
     secure_cookie: Option<bool>,
+
+    /// Blocked file extensions for uploads (comma-separated, e.g. ".php,.sh,.exe")
+    #[arg(long, env = "RUSTYFILE_BLOCKED_UPLOAD_EXTENSIONS")]
+    blocked_upload_extensions: Option<String>,
+
+    /// Max API requests per IP per minute for expensive endpoints
+    #[arg(long, env = "RUSTYFILE_API_RATE_LIMIT")]
+    api_rate_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +136,14 @@ pub struct AppConfig {
 
     #[serde(default = "default_secure_cookie")]
     pub secure_cookie: bool,
+
+    /// Comma-separated list of blocked file extensions for uploads (e.g. ".php,.sh,.exe")
+    #[serde(default = "default_blocked_upload_extensions")]
+    pub blocked_upload_extensions: String,
+
+    /// Max API requests per IP per minute for expensive endpoints (search, thumbnails, HLS)
+    #[serde(default = "default_api_rate_limit")]
+    pub api_rate_limit: u32,
 }
 
 fn default_host() -> String {
@@ -170,7 +186,7 @@ fn default_max_listing_items() -> usize {
     10_000
 }
 fn default_trusted_proxies() -> String {
-    "".into() // Empty = trust all (backwards compatible)
+    "127.0.0.1".into()
 }
 fn default_cache_dir() -> String {
     "./rustyfile-data/cache".into()
@@ -180,6 +196,12 @@ fn default_tus_expiry_hours() -> u64 {
 }
 fn default_secure_cookie() -> bool {
     true
+}
+fn default_blocked_upload_extensions() -> String {
+    ".php,.phtml,.php5,.sh,.bash,.cgi,.pl,.py,.rb,.exe,.bat,.cmd,.ps1,.msi,.dll,.so,.com,.scr,.vbs,.vbe,.wsf,.wsh,.jar".into()
+}
+fn default_api_rate_limit() -> u32 {
+    60
 }
 
 impl Default for AppConfig {
@@ -202,6 +224,8 @@ impl Default for AppConfig {
             cache_dir: default_cache_dir(),
             tus_expiry_hours: default_tus_expiry_hours(),
             secure_cookie: default_secure_cookie(),
+            blocked_upload_extensions: default_blocked_upload_extensions(),
+            api_rate_limit: default_api_rate_limit(),
         }
     }
 }
@@ -246,6 +270,8 @@ impl AppConfig {
             cache_dir,
             tus_expiry_hours,
             secure_cookie,
+            blocked_upload_extensions,
+            api_rate_limit,
         );
 
         let config: Self = figment.extract()?;

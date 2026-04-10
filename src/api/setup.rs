@@ -23,7 +23,6 @@ struct CreateAdminRequest {
 
 #[derive(Debug, Serialize)]
 struct CreateAdminResponse {
-    token: String,
     user: user_repo::User,
 }
 
@@ -102,19 +101,19 @@ async fn create_admin(
         state.config.jwt_expiry_hours,
     )?;
 
-    let cookie = format!(
-        "rustyfile_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={}",
+    let mut cookie = format!(
+        "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
         token,
         state.config.jwt_expiry_hours * 3600
     );
+    if state.config.secure_cookie {
+        cookie.push_str("; Secure");
+    }
 
     Ok((
         StatusCode::CREATED,
         [(axum::http::header::SET_COOKIE, cookie)],
-        Json(CreateAdminResponse {
-            token: token.clone(),
-            user,
-        }),
+        Json(CreateAdminResponse { user }),
     ))
 }
 

@@ -201,6 +201,11 @@ async fn save_file(
 ) -> Result<(StatusCode, Json<MutationResponse>), AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
 
+    // Check blocked file extensions.
+    if let Some(name) = resolved.file_name().and_then(|n| n.to_str()) {
+        file_ops::check_blocked_extension(name, &state.config.blocked_upload_extensions)?;
+    }
+
     file_ops::write_file(&resolved, &body).await?;
 
     if let Some(parent) = resolved.parent() {

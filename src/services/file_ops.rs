@@ -5,6 +5,26 @@ use serde::Serialize;
 
 use crate::error::AppError;
 
+/// Returns `Err` if the filename's extension is in the blocked list.
+pub fn check_blocked_extension(filename: &str, blocked_csv: &str) -> Result<(), AppError> {
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e.to_lowercase()));
+
+    if let Some(ext) = ext {
+        for blocked in blocked_csv.split(',') {
+            let blocked = blocked.trim().to_lowercase();
+            if !blocked.is_empty() && ext == blocked {
+                return Err(AppError::BadRequest(format!(
+                    "File type '{ext}' is not allowed"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
     pub name: String,

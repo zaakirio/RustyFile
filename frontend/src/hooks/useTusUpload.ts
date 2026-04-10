@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
 import * as tus from 'tus-js-client'
-import { getToken } from '../api/client'
 
 export interface UploadItem {
   id: string
@@ -78,7 +77,6 @@ export function useTusUpload({
 
       const path = currentPathRef.current
       const dest = path ? `${path}/${item.name}` : item.name
-      const token = getToken()
 
       item.status = 'uploading'
       item.startedAt = Date.now()
@@ -90,12 +88,11 @@ export function useTusUpload({
         endpoint: '/api/tus',
         retryDelays: [0, 1000, 3000, 5000, 10000],
         chunkSize: 5 * 1024 * 1024,
+        // Auth is handled via HttpOnly cookie (sent automatically by the browser).
+        withCredentials: true,
         metadata: {
           filename: item.name,
           destination: dest,
-        },
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         onProgress: (bytesUploaded: number, bytesTotal: number) => {
           const current = map.get(id)

@@ -10,12 +10,19 @@ use crate::error::AppError;
 pub fn create_pool(config: &AppConfig) -> anyhow::Result<Pool> {
     let db_path = config.db_path();
 
-    let mut cfg = Config::new(db_path);
+    let mut cfg = Config::new(&db_path);
     cfg.pool = Some(PoolConfig {
         max_size: 4,
         ..Default::default()
     });
     let pool = cfg.create_pool(Runtime::Tokio1)?;
+
+    // Restrict database file to owner-only access (contains JWT secret and password hashes).
+    #[cfg(unix)]
+    if db_path.exists() {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
+    }
 
     Ok(pool)
 }

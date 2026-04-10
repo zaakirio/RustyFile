@@ -46,7 +46,7 @@ pub fn routes(state: AppState) -> Router<AppState> {
         .route("/{id}", head(query_offset))
         .route("/{id}", patch(append_chunk))
         .route("/{id}", delete(cancel_upload))
-        .layer(middleware::from_fn_with_state(state, require_auth))
+        .route_layer(middleware::from_fn_with_state(state, require_auth))
 }
 
 fn parse_upload_metadata(header_value: &str) -> Vec<(String, String)> {
@@ -132,6 +132,8 @@ async fn create_upload(
         .ok_or_else(|| AppError::BadRequest("Upload-Metadata must include 'filename'".into()))?;
 
     let filename = sanitize_filename(&raw_filename)?;
+
+    file_ops::check_blocked_extension(&filename, &state.config.blocked_upload_extensions)?;
 
     let destination = metadata
         .iter()

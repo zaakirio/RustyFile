@@ -1,18 +1,5 @@
 import type { ApiError, SearchParams, SearchResponse } from '../lib/types'
 
-// In-memory token for programmatic API calls (TUS uploads, etc.)
-// NOT persisted to localStorage. Session survives via HttpOnly cookie.
-let token: string | null = null
-
-export function setToken(t: string | null) {
-  token = t
-  // No localStorage — the HttpOnly cookie handles persistence.
-}
-
-export function getToken() {
-  return token
-}
-
 export class ApiClientError extends Error {
   status: number
   code: string
@@ -32,20 +19,18 @@ async function request<T>(
   raw = false,
 ): Promise<T> {
   const headers: Record<string, string> = {}
-  if (token) headers['Authorization'] = `Bearer ${token}`
   if (body && !raw) headers['Content-Type'] = 'application/json'
   if (body && raw) headers['Content-Type'] = 'text/plain'
 
   const res = await fetch(path, {
     method,
     headers,
+    // Auth is handled entirely via HttpOnly cookie (sent automatically for same-origin).
     body: body ? (raw ? (body as string) : JSON.stringify(body)) : undefined,
   })
 
   if (!res.ok) {
     if (res.status === 401 && !path.includes('/auth/')) {
-      setToken(null)
-      // Trigger auth expiry event instead of hard redirect
       window.dispatchEvent(new Event('rustyfile:auth-expired'))
     }
     const err: ApiError = await res.json().catch(() => ({

@@ -111,13 +111,11 @@ struct LoginRequest {
 
 #[derive(Debug, Serialize)]
 struct AuthResponse {
-    token: String,
     user: user_repo::User,
 }
 
 #[derive(Debug, Serialize)]
 struct RefreshResponse {
-    token: String,
     user: user_repo::User,
 }
 
@@ -177,10 +175,7 @@ async fn login(
             Ok((
                 StatusCode::OK,
                 [(axum::http::header::SET_COOKIE, cookie)],
-                Json(AuthResponse {
-                    token: token.clone(),
-                    user,
-                }),
+                Json(AuthResponse { user }),
             ))
         }
         None => {
@@ -219,7 +214,7 @@ async fn logout(
 async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<RefreshResponse>, AppError> {
+) -> Result<impl axum::response::IntoResponse, AppError> {
     let token = extract_token(&headers)?;
     let claims = validate_token(&token, &state.jwt_secret, Some(&state.token_blocklist))?;
 
@@ -236,10 +231,19 @@ async fn refresh(
 
     state.token_blocklist.insert(token, ()).await;
 
-    Ok(Json(RefreshResponse {
-        token: new_token,
-        user,
-    }))
+    let mut cookie = format!(
+        "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        new_token,
+        state.config.jwt_expiry_hours * 3600
+    );
+    if state.config.secure_cookie {
+        cookie.push_str("; Secure");
+    }
+
+    Ok((
+        [(axum::http::header::SET_COOKIE, cookie)],
+        Json(RefreshResponse { user }),
+    ))
 }
 
 pub fn routes() -> Router<AppState> {

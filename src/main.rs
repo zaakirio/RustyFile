@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
 
     let login_limiter =
-        rustyfile::state::new_login_limiter(std::num::NonZeroU32::new(10).unwrap(), 15 * 60);
+        rustyfile::state::new_rate_limiter(std::num::NonZeroU32::new(10).unwrap(), 15 * 60);
 
     // Constant-time login failure (timing-attack mitigation).
     let dummy_hash = {
@@ -88,6 +88,11 @@ async fn main() -> anyhow::Result<()> {
             .time_to_idle(std::time::Duration::from_secs(2 * 60 * 60))
             .build();
 
+    let api_limiter = rustyfile::state::new_rate_limiter(
+        std::num::NonZeroU32::new(config.api_rate_limit).unwrap_or(std::num::NonZeroU32::new(60).unwrap()),
+        60,
+    );
+
     let token_blocklist: moka::future::Cache<String, ()> = moka::future::Cache::builder()
         .max_capacity(10_000)
         .time_to_live(std::time::Duration::from_secs(
@@ -112,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
         hls_sources,
         search_indexer,
         token_blocklist,
+        api_limiter,
     };
 
     {

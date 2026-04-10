@@ -6,7 +6,7 @@ import {
   useCallback,
 } from 'react'
 import type { ReactNode } from 'react'
-import { api, setToken } from '../api/client'
+import { api } from '../api/client'
 import type { User, AuthResponse, SetupStatus } from '../lib/types'
 
 interface AuthState {
@@ -27,7 +27,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleExpired = () => {
-      setToken(null)
       setUser(null)
     }
     window.addEventListener('rustyfile:auth-expired', handleExpired)
@@ -37,14 +36,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const status = await api.get<SetupStatus>('/api/setup/status')
         setSetupRequired(status.setup_required)
         if (!status.setup_required) {
-          // Always attempt refresh — the HttpOnly cookie may hold a valid session
-          // even though the in-memory token is null after a page reload.
+          // Attempt refresh — the HttpOnly cookie carries the session.
           try {
             const res = await api.post<AuthResponse>('/api/auth/refresh')
-            setToken(res.token)
             setUser(res.user)
           } catch {
-            setToken(null)
+            // No valid session
           }
         }
       } catch {
@@ -66,7 +63,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         username,
         password,
       })
-      setToken(res.token)
       setUser(res.user)
       setSetupRequired(false)
     },
@@ -80,7 +76,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         password_confirm: password,
       })
-      setToken(res.token)
       setUser(res.user)
       setSetupRequired(false)
     },
@@ -88,9 +83,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const logout = useCallback(() => {
-    setToken(null)
     setUser(null)
-    api.post('/api/auth/logout').catch(() => {})
+    api.post('/api/auth/logout').catch((err) => {
+      if (import.meta.env.DEV) console.warn('Logout request failed:', err)
+    })
   }, [])
 
   return (
