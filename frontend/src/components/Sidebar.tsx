@@ -6,10 +6,12 @@ import type { DirListing } from '../lib/types'
 
 export default function Sidebar() {
   const [dirs, setDirs] = useState<{ name: string; path: string }[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
+    const controller = new AbortController()
     api
-      .get<DirListing>('/api/fs')
+      .get<DirListing>('/api/fs', controller.signal)
       .then((listing) => {
         setDirs(
           listing.items
@@ -17,7 +19,11 @@ export default function Sidebar() {
             .map((i) => ({ name: i.name, path: i.path })),
         )
       })
-      .catch(() => {})
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setLoadError(err instanceof Error ? err.message : 'Failed to load directories')
+      })
+    return () => controller.abort()
   }, [])
 
   return (
@@ -32,6 +38,11 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
+        {loadError && (
+          <div className="px-3 py-2 font-mono text-[11px] text-primary uppercase tracking-wider">
+            [ {loadError} ]
+          </div>
+        )}
         <NavLink
           to="/browse"
           end

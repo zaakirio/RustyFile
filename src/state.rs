@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,13 +36,13 @@ pub fn new_rate_limiter(max_requests: NonZeroU32, window_secs: u64) -> Arc<IpRat
 #[derive(Clone)]
 pub struct AppState {
     pub db: Pool,
-    pub config: AppConfig,
+    pub config: Arc<AppConfig>,
     pub setup_guard: Arc<SetupGuard>,
-    pub jwt_secret: Vec<u8>,
-    pub canonical_root: PathBuf,
+    pub jwt_secret: Arc<[u8]>,
+    pub canonical_root: Arc<PathBuf>,
     pub login_limiter: Arc<IpRateLimiter>,
     /// Timing-attack-safe login failures.
-    pub dummy_hash: String,
+    pub dummy_hash: Arc<str>,
     pub dir_cache: DirCache,
     pub thumb_worker: ThumbWorker,
     pub transcoder: HlsTranscoder,
@@ -49,6 +50,8 @@ pub struct AppState {
     pub search_indexer: SearchIndexer,
     pub token_blocklist: TokenBlocklist,
     pub api_limiter: Arc<IpRateLimiter>,
+    /// Pre-parsed set of blocked upload extensions (parsed once at startup).
+    pub blocked_extensions: Arc<HashSet<String>>,
 }
 
 pub struct SetupGuard {

@@ -9,14 +9,15 @@ export function useFiles(path: string) {
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
 
-  const fetchListing = useCallback(async () => {
+  const fetchListing = useCallback(async (signal?: AbortSignal) => {
     if (!mountedRef.current) return
     setLoading(true)
     setError(null)
     try {
-      const res = await api.get<DirListing>(`/api/fs/${encodeFsPath(path)}`)
+      const res = await api.get<DirListing>(`/api/fs/${encodeFsPath(path)}`, signal)
       if (mountedRef.current) setListing(res)
     } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === 'AbortError') return
       if (mountedRef.current) {
         const message = e instanceof Error ? e.message : 'Failed to load'
         setError(message)
@@ -28,8 +29,12 @@ export function useFiles(path: string) {
 
   useEffect(() => {
     mountedRef.current = true
-    fetchListing()
-    return () => { mountedRef.current = false }
+    const controller = new AbortController()
+    fetchListing(controller.signal)
+    return () => {
+      controller.abort()
+      mountedRef.current = false
+    }
   }, [fetchListing])
 
   const deleteItem = useCallback(

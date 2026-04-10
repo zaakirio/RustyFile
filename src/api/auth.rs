@@ -103,6 +103,18 @@ pub(crate) fn extract_token(headers: &HeaderMap) -> Result<String, AppError> {
     ))
 }
 
+pub(crate) fn build_auth_cookie(token: &str, jwt_expiry_hours: u64, secure: bool) -> String {
+    let mut cookie = format!(
+        "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        token,
+        jwt_expiry_hours * 3600
+    );
+    if secure {
+        cookie.push_str("; Secure");
+    }
+    cookie
+}
+
 #[derive(Debug, Deserialize)]
 struct LoginRequest {
     username: String,
@@ -163,14 +175,11 @@ async fn login(
                 state.config.jwt_expiry_hours,
             )?;
 
-            let mut cookie = format!(
-                "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-                token,
-                state.config.jwt_expiry_hours * 3600
+            let cookie = build_auth_cookie(
+                &token,
+                state.config.jwt_expiry_hours,
+                state.config.secure_cookie,
             );
-            if state.config.secure_cookie {
-                cookie.push_str("; Secure");
-            }
 
             Ok((
                 StatusCode::OK,
@@ -231,14 +240,11 @@ async fn refresh(
 
     state.token_blocklist.insert(token, ()).await;
 
-    let mut cookie = format!(
-        "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-        new_token,
-        state.config.jwt_expiry_hours * 3600
+    let cookie = build_auth_cookie(
+        &new_token,
+        state.config.jwt_expiry_hours,
+        state.config.secure_cookie,
     );
-    if state.config.secure_cookie {
-        cookie.push_str("; Secure");
-    }
 
     Ok((
         [(axum::http::header::SET_COOKIE, cookie)],

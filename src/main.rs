@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use rustyfile::api;
@@ -46,16 +48,18 @@ async fn main() -> anyhow::Result<()> {
     let jwt_secret = db::get_or_create_jwt_secret(&pool).await?;
 
     // Avoid per-request syscalls.
-    let canonical_root = std::path::PathBuf::from(&config.root)
-        .canonicalize()
-        .expect("Root directory must exist and be accessible");
+    let canonical_root = Arc::new(
+        std::path::PathBuf::from(&config.root)
+            .canonicalize()
+            .expect("Root directory must exist and be accessible"),
+    );
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
 
     let login_limiter =
         rustyfile::state::new_rate_limiter(std::num::NonZeroU32::new(10).unwrap(), 15 * 60);
 
     // Constant-time login failure (timing-attack mitigation).
-    let dummy_hash = {
+    let dummy_hash: Arc<str> = {
         use argon2::password_hash::SaltString;
         use argon2::PasswordHasher;
         let salt = SaltString::generate(&mut rand::rngs::OsRng);
@@ -63,7 +67,18 @@ async fn main() -> anyhow::Result<()> {
             .hash_password(b"rustyfile_dummy_timing_password", &salt)
             .expect("Failed to hash dummy password")
             .to_string()
+            .into()
     };
+
+    // Parse blocked upload extensions once at startup.
+    let blocked_extensions: Arc<HashSet<String>> = Arc::new(
+        config
+            .blocked_upload_extensions
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect(),
+    );
 
     let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
 
@@ -104,11 +119,13 @@ async fn main() -> anyhow::Result<()> {
     let search_indexer =
         rustyfile::services::search_index::SearchIndexer::new(pool.clone(), canonical_root.clone());
 
+    let config = Arc::new(config);
+
     let state = AppState {
         db: pool,
         config: config.clone(),
         setup_guard,
-        jwt_secret,
+        jwt_secret: jwt_secret.into(),
         canonical_root,
         login_limiter,
         dummy_hash,
@@ -119,7 +136,11 @@ async fn main() -> anyhow::Result<()> {
         search_indexer,
         token_blocklist,
         api_limiter,
+        blocked_extensions,
     };
+
+    // ── Graceful shutdown token ───────────────────────────────────────────────
+    let shutdown_token = CancellationToken::new();
 
     {
         let indexer = state.search_indexer.clone();
@@ -137,6 +158,7 @@ async fn main() -> anyhow::Result<()> {
         let dir_cache_watcher = state.dir_cache.clone();
         let watch_root = state.canonical_root.clone();
         let search_indexer_watcher = state.search_indexer.clone();
+        let watcher_token = shutdown_token.clone();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(256);
 
@@ -150,26 +172,35 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to create filesystem watcher");
 
         debouncer
-            .watch(&watch_root, RecursiveMode::NonRecursive)
+            .watch(&*watch_root, RecursiveMode::NonRecursive)
             .expect("Failed to watch root directory");
 
         tokio::spawn(async move {
             let _debouncer = debouncer; // Keep alive
-            while let Some(Ok(events)) = rx.recv().await {
-                for event in events {
-                    for path in &event.paths {
-                        if let Some(parent) = path.parent() {
-                            let key = parent.to_string_lossy().to_string();
-                            dir_cache_watcher.invalidate(&key).await;
-                        }
-                        if let Ok(rel) = path.strip_prefix(&watch_root) {
-                            let rel_str = rel.to_string_lossy().to_string();
-                            if path.exists() {
-                                let _ = search_indexer_watcher.upsert(&rel_str).await;
-                            } else {
-                                let _ = search_indexer_watcher.remove(&rel_str).await;
+            loop {
+                tokio::select! {
+                    msg = rx.recv() => {
+                        let Some(Ok(events)) = msg else { break };
+                        for event in events {
+                            for path in &event.paths {
+                                if let Some(parent) = path.parent() {
+                                    let key = parent.to_string_lossy().to_string();
+                                    dir_cache_watcher.invalidate(&key).await;
+                                }
+                                if let Ok(rel) = path.strip_prefix(&*watch_root) {
+                                    let rel_str = rel.to_string_lossy().to_string();
+                                    if path.exists() {
+                                        let _ = search_indexer_watcher.upsert(&rel_str).await;
+                                    } else {
+                                        let _ = search_indexer_watcher.remove(&rel_str).await;
+                                    }
+                                }
                             }
                         }
+                    }
+                    _ = watcher_token.cancelled() => {
+                        tracing::info!("Filesystem watcher shutting down");
+                        break;
                     }
                 }
             }
@@ -178,7 +209,30 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Filesystem watcher active for cache invalidation and search indexing");
     }
 
-    api::tus::spawn_cleanup_task(state.db.clone(), state.config.cache_dir.clone());
+    // ── Background cleanup tasks ──────────────────────────────────────────────
+    api::tus::spawn_cleanup_task(
+        state.db.clone(),
+        state.config.cache_dir.clone(),
+        shutdown_token.clone(),
+    );
+
+    // HLS segment cleanup (every 30 min, removes dirs older than 2h).
+    {
+        let hls_dir = state.transcoder.segment_dir().to_path_buf();
+        let token = shutdown_token.clone();
+        tokio::spawn(rustyfile::services::transcoder::cleanup_hls_segments(
+            hls_dir, token,
+        ));
+    }
+
+    // Thumbnail cleanup (every 2h, removes files older than 7 days).
+    {
+        let thumb_dir = state.thumb_worker.cache_dir().to_path_buf();
+        let token = shutdown_token.clone();
+        tokio::spawn(rustyfile::services::thumbnail::cleanup_thumbnails(
+            thumb_dir, token,
+        ));
+    }
 
     let app = api::build_router(state);
 
@@ -190,7 +244,7 @@ async fn main() -> anyhow::Result<()> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(shutdown_signal(shutdown_token))
     .await?;
 
     tracing::info!("Server shut down gracefully");
@@ -242,7 +296,7 @@ async fn cleanup_orphan_temp_files(root: &str) {
     }
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(shutdown_token: CancellationToken) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -268,4 +322,7 @@ async fn shutdown_signal() {
             tracing::info!("Received SIGTERM, shutting down...");
         }
     }
+
+    // Signal all background tasks to stop.
+    shutdown_token.cancel();
 }

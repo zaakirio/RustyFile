@@ -9,15 +9,15 @@ export default function LoginPage() {
   const { user, setupRequired, login, setupAdmin } = useAuth()
   const navigate = useNavigate()
 
-  // Redirect already-authenticated users to browse
-  if (user && !setupRequired) {
-    return <Navigate to="/browse" replace />
-  }
-
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  // Redirect already-authenticated users to browse
+  if (user && !setupRequired) {
+    return <Navigate to="/browse" replace />
+  }
 
   const isSetup = setupRequired === true
 

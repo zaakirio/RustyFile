@@ -19,6 +19,7 @@ export function useSearch(): UseSearchResult {
   const [error, setError] = useState<string | null>(null)
   const [isActive, setIsActive] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -26,6 +27,7 @@ export function useSearch(): UseSearchResult {
     return () => {
       mountedRef.current = false
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      abortRef.current?.abort()
     }
   }, [])
 
@@ -44,14 +46,17 @@ export function useSearch(): UseSearchResult {
     setLoading(true)
 
     debounceRef.current = setTimeout(async () => {
+      abortRef.current?.abort()
+      abortRef.current = new AbortController()
       try {
-        const resp = await api.search(params)
+        const resp = await api.search(params, abortRef.current.signal)
         if (mountedRef.current) {
           setResults(resp.results)
           setTotal(resp.total)
           setError(null)
         }
       } catch (e: unknown) {
+        if (e instanceof DOMException && e.name === 'AbortError') return
         if (mountedRef.current) {
           setError(e instanceof Error ? e.message : 'Search failed')
         }

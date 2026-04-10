@@ -1,17 +1,11 @@
 import type { UploadItem } from '../hooks/useTusUpload'
+import { formatSize } from '../lib/format'
 
 interface UploadManagerProps {
   items: UploadItem[]
   onPause: (id: string) => void
   onResume: (id: string) => void
   onClear: () => void
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`
 }
 
 function formatSpeed(bytesPerSec: number): string {
