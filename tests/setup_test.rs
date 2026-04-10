@@ -39,8 +39,17 @@ async fn create_admin_succeeds() {
 
     assert_eq!(resp.status(), 201);
 
+    let cookie = resp
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .expect("Response should contain a Set-Cookie header");
+    let cookie_str = cookie.to_str().unwrap();
+    assert!(
+        cookie_str.contains("rustyfile_token="),
+        "Cookie should contain rustyfile_token"
+    );
+
     let json: serde_json::Value = resp.json().await.expect("Failed to parse admin response");
-    assert!(json["token"].is_string(), "Response should contain a token");
     assert!(
         json["user"].is_object(),
         "Response should contain a user object"

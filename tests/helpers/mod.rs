@@ -44,6 +44,8 @@ impl TestApp {
             cache_dir: data_dir.path().join("cache").to_string_lossy().to_string(),
             tus_expiry_hours: 24,
             secure_cookie: false,
+            blocked_upload_extensions: ".php,.exe".into(),
+            api_rate_limit: 120,
         };
 
         let pool = create_pool(&config).expect("Failed to create pool");
@@ -61,7 +63,7 @@ impl TestApp {
             .expect("Root temp dir must be canonicalizable");
 
         let login_limiter =
-            rustyfile::state::new_login_limiter(std::num::NonZeroU32::new(100).unwrap(), 60);
+            rustyfile::state::new_rate_limiter(std::num::NonZeroU32::new(100).unwrap(), 60);
 
         let dummy_hash = {
             use argon2::password_hash::SaltString;
@@ -110,6 +112,10 @@ impl TestApp {
             hls_sources,
             search_indexer,
             token_blocklist,
+            api_limiter: rustyfile::state::new_rate_limiter(
+                std::num::NonZeroU32::new(120).unwrap(),
+                60,
+            ),
         };
 
         let app = build_router(state);
@@ -163,10 +169,20 @@ impl TestApp {
 
         assert_eq!(resp.status(), 201, "create_admin helper did not get 201");
 
-        let json: serde_json::Value = resp.json().await.expect("Failed to parse admin response");
-        json["token"]
-            .as_str()
-            .expect("No token in create_admin response")
+        // Token is returned via Set-Cookie header, not the response body.
+        let cookie = resp
+            .headers()
+            .get(reqwest::header::SET_COOKIE)
+            .expect("No Set-Cookie header in create_admin response")
+            .to_str()
+            .expect("Set-Cookie header is not valid UTF-8");
+
+        cookie
+            .split(';')
+            .next()
+            .unwrap()
+            .strip_prefix("rustyfile_token=")
+            .expect("Cookie does not start with rustyfile_token=")
             .to_string()
     }
 
