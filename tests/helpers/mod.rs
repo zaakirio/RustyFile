@@ -58,14 +58,16 @@ impl TestApp {
             .await
             .expect("Failed to get JWT secret");
 
-        let canonical_root = std::path::PathBuf::from(&config.root)
-            .canonicalize()
-            .expect("Root temp dir must be canonicalizable");
+        let canonical_root = Arc::new(
+            std::path::PathBuf::from(&config.root)
+                .canonicalize()
+                .expect("Root temp dir must be canonicalizable"),
+        );
 
         let login_limiter =
             rustyfile::state::new_rate_limiter(std::num::NonZeroU32::new(100).unwrap(), 60);
 
-        let dummy_hash = {
+        let dummy_hash: Arc<str> = {
             use argon2::password_hash::SaltString;
             use argon2::PasswordHasher;
             let salt = SaltString::generate(&mut rand::rngs::OsRng);
@@ -73,6 +75,7 @@ impl TestApp {
                 .hash_password(b"rustyfile_dummy_timing_password", &salt)
                 .expect("Failed to hash dummy password")
                 .to_string()
+                .into()
         };
 
         let dir_cache = rustyfile::services::cache::DirCache::new(100, 30);
@@ -95,6 +98,17 @@ impl TestApp {
             .time_to_live(std::time::Duration::from_secs(2 * 3600))
             .build();
 
+        let blocked_extensions: Arc<std::collections::HashSet<String>> = Arc::new(
+            config
+                .blocked_upload_extensions
+                .split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect(),
+        );
+
+        let config = Arc::new(config);
+
         let search_indexer = SearchIndexer::new(pool.clone(), canonical_root.clone());
         let search_indexer_for_test = search_indexer.clone();
 
@@ -102,7 +116,7 @@ impl TestApp {
             db: pool,
             config,
             setup_guard,
-            jwt_secret,
+            jwt_secret: jwt_secret.into(),
             canonical_root,
             login_limiter,
             dummy_hash,
@@ -116,6 +130,7 @@ impl TestApp {
                 std::num::NonZeroU32::new(120).unwrap(),
                 60,
             ),
+            blocked_extensions,
         };
 
         let app = build_router(state);
