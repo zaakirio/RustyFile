@@ -101,14 +101,11 @@ async fn create_admin(
         state.config.jwt_expiry_hours,
     )?;
 
-    let mut cookie = format!(
-        "rustyfile_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-        token,
-        state.config.jwt_expiry_hours * 3600
+    let cookie = auth::build_auth_cookie(
+        &token,
+        state.config.jwt_expiry_hours,
+        state.config.secure_cookie,
     );
-    if state.config.secure_cookie {
-        cookie.push_str("; Secure");
-    }
 
     Ok((
         StatusCode::CREATED,

@@ -17,6 +17,7 @@ async function request<T>(
   path: string,
   body?: unknown,
   raw = false,
+  signal?: AbortSignal,
 ): Promise<T> {
   const headers: Record<string, string> = {}
   if (body && !raw) headers['Content-Type'] = 'application/json'
@@ -25,6 +26,7 @@ async function request<T>(
   const res = await fetch(path, {
     method,
     headers,
+    signal,
     // Auth is handled entirely via HttpOnly cookie (sent automatically for same-origin).
     body: body ? (raw ? (body as string) : JSON.stringify(body)) : undefined,
   })
@@ -46,13 +48,17 @@ async function request<T>(
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>('GET', path),
-  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
-  put: <T>(path: string, body?: unknown, raw = false) =>
-    request<T>('PUT', path, body, raw),
-  patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
-  delete: <T>(path: string) => request<T>('DELETE', path),
-  search: (params: SearchParams) => {
+  get: <T>(path: string, signal?: AbortSignal) =>
+    request<T>('GET', path, undefined, false, signal),
+  post: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
+    request<T>('POST', path, body, false, signal),
+  put: <T>(path: string, body?: unknown, raw = false, signal?: AbortSignal) =>
+    request<T>('PUT', path, body, raw, signal),
+  patch: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
+    request<T>('PATCH', path, body, false, signal),
+  delete: <T>(path: string, signal?: AbortSignal) =>
+    request<T>('DELETE', path, undefined, false, signal),
+  search: (params: SearchParams, signal?: AbortSignal) => {
     const qs = new URLSearchParams()
     qs.set('q', params.q)
     if (params.type) qs.set('type', params.type)
@@ -63,6 +69,6 @@ export const api = {
     if (params.path) qs.set('path', params.path)
     if (params.limit !== undefined) qs.set('limit', String(params.limit))
     if (params.offset !== undefined) qs.set('offset', String(params.offset))
-    return request<SearchResponse>('GET', `/api/fs/search?${qs.toString()}`)
+    return request<SearchResponse>('GET', `/api/fs/search?${qs.toString()}`, undefined, false, signal)
   },
 }

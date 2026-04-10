@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { NavArrowLeft, NavArrowRight } from 'iconoir-react'
 import { api } from '../api/client'
@@ -138,8 +138,10 @@ export default function EditorPage() {
   }, [])
 
   // Line numbers
-  const lineCount = content.split('\n').length
-  const lineNumbers = Array.from({ length: lineCount }, (_, i) => i + 1)
+  const lineNumbers = useMemo(() => {
+    const count = content.split('\n').length
+    return Array.from({ length: count }, (_, i) => i + 1)
+  }, [content])
 
   if (loading) {
     return (

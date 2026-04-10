@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use deadpool_sqlite::Pool;
@@ -68,7 +69,7 @@ pub trait SearchIndex: Send + Sync {
 #[derive(Clone)]
 pub struct SearchIndexer {
     db: Pool,
-    canonical_root: PathBuf,
+    canonical_root: Arc<PathBuf>,
 }
 
 struct IndexEntry {
@@ -82,7 +83,7 @@ struct IndexEntry {
 }
 
 impl SearchIndexer {
-    pub fn new(db: Pool, canonical_root: PathBuf) -> Self {
+    pub fn new(db: Pool, canonical_root: Arc<PathBuf>) -> Self {
         Self { db, canonical_root }
     }
 }
@@ -95,7 +96,6 @@ impl SearchIndex for SearchIndexer {
         let entries: Vec<IndexEntry> =
             tokio::task::spawn_blocking(move || walk_tree(&root)).await??;
 
-        let all_paths: HashSet<String> = entries.iter().map(|e| e.rel_path.clone()).collect();
         let entry_count = entries.len();
 
         let pool = self.db.clone();
@@ -107,9 +107,12 @@ impl SearchIndex for SearchIndexer {
         conn.interact(move |conn| {
             let tx = conn.transaction()?;
 
-            const BATCH_INSERT_SIZE: usize = 500;
+            // Collect all live paths for the stale-entry cleanup pass.
+            let all_paths: HashSet<&str> = entries.iter().map(|e| e.rel_path.as_str()).collect();
 
-            for chunk in entries.chunks(BATCH_INSERT_SIZE) {
+            const BATCH_SIZE: usize = 500;
+
+            for chunk in entries.chunks(BATCH_SIZE) {
                 for entry in chunk {
                     tx.execute(
                         "INSERT OR REPLACE INTO file_index \
@@ -128,21 +131,31 @@ impl SearchIndex for SearchIndexer {
                 }
             }
 
+            // Batch-delete stale entries: SELECT all DB paths, collect stale
+            // ones, then delete in batched IN-clauses instead of N individual
+            // DELETE statements.
             {
                 let mut stmt = tx.prepare("SELECT path FROM file_index")?;
-                let db_paths: Vec<String> = stmt
+                let stale_paths: Vec<String> = stmt
                     .query_map([], |row| row.get::<_, String>(0))?
                     .filter_map(|r| r.ok())
+                    .filter(|p| !all_paths.contains(p.as_str()))
                     .collect();
                 drop(stmt);
 
-                for db_path in &db_paths {
-                    if !all_paths.contains(db_path) {
-                        tx.execute(
-                            "DELETE FROM file_index WHERE path = ?1",
-                            params![db_path],
-                        )?;
-                    }
+                for chunk in stale_paths.chunks(BATCH_SIZE) {
+                    let placeholders: String = chunk
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("?{}", i + 1))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let sql = format!(
+                        "DELETE FROM file_index WHERE path IN ({placeholders})"
+                    );
+                    let params: Vec<&dyn rusqlite::types::ToSql> =
+                        chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+                    tx.execute(&sql, params.as_slice())?;
                 }
             }
 

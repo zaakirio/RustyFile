@@ -27,7 +27,11 @@ async fn playlist(
         return Err(AppError::BadRequest("Cannot transcode a directory".into()));
     }
 
-    let source_key = state.transcoder.source_key(&resolved)?;
+    let transcoder = state.transcoder.clone();
+    let resolved_for_key = resolved.clone();
+    let source_key = tokio::task::spawn_blocking(move || transcoder.source_key(&resolved_for_key))
+        .await
+        .map_err(|e| AppError::Internal(format!("spawn_blocking join error: {e}")))??;
 
     state
         .hls_sources

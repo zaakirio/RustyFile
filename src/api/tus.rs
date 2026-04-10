@@ -10,6 +10,7 @@ use base64::Engine;
 use http_body_util::BodyExt;
 use rusqlite::params;
 use std::io::Write;
+use tokio_util::sync::CancellationToken;
 
 use crate::api::middleware::auth::require_auth;
 use crate::error::AppError;
@@ -123,22 +124,22 @@ async fn create_upload(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let metadata = parse_upload_metadata(metadata_str);
+    let mut metadata = parse_upload_metadata(metadata_str);
 
     let raw_filename = metadata
         .iter()
-        .find(|(k, _)| k == "filename")
-        .map(|(_, v)| v.clone())
+        .position(|(k, _)| k == "filename")
+        .map(|i| metadata.swap_remove(i).1)
         .ok_or_else(|| AppError::BadRequest("Upload-Metadata must include 'filename'".into()))?;
 
     let filename = sanitize_filename(&raw_filename)?;
 
-    file_ops::check_blocked_extension(&filename, &state.config.blocked_upload_extensions)?;
+    file_ops::check_blocked_extension(&filename, &state.blocked_extensions)?;
 
     let destination = metadata
         .iter()
-        .find(|(k, _)| k == "destination")
-        .map(|(_, v)| v.clone())
+        .position(|(k, _)| k == "destination")
+        .map(|i| metadata.swap_remove(i).1)
         .unwrap_or_default();
 
     if !destination.is_empty() {
@@ -158,29 +159,19 @@ async fn create_upload(
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(expiry_hours as i64);
     let expires_str = expires_at.to_rfc3339();
 
-    let db = state.db.clone();
     let uid = upload_id.clone();
-    let fname = filename.clone();
-    let dest = destination.clone();
     let user_id = user.id;
     let exp_str = expires_str.clone();
 
-    let conn = db
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    conn.interact(move |conn| {
+    crate::db::interact(&state.db, move |conn| {
         conn.execute(
             "INSERT INTO uploads (id, filename, destination, total_bytes, received_bytes, created_by, expires_at, completed)
              VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, 0)",
-            params![uid, fname, dest, total_bytes, user_id, exp_str],
+            params![uid, filename, destination, total_bytes, user_id, exp_str],
         )?;
-        Ok::<_, rusqlite::Error>(())
+        Ok(())
     })
-    .await
-    .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
-    .map_err(AppError::Database)?;
+    .await?;
 
     let location = format!("/api/tus/{upload_id}");
     let mut resp_headers = HeaderMap::new();
@@ -206,25 +197,20 @@ async fn query_offset(
     State(state): State<AppState>,
     Path(upload_id): Path<String>,
 ) -> Result<Response, AppError> {
-    let db = state.db.clone();
     let uid = upload_id.clone();
 
-    let conn = db
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    let (received_bytes, total_bytes): (i64, i64) = conn
-        .interact(move |conn| {
-            conn.query_row(
-                "SELECT received_bytes, total_bytes FROM uploads WHERE id = ?1",
-                params![uid],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-        })
-        .await
-        .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
-        .map_err(|_| AppError::UploadNotFound(upload_id))?;
+    let (received_bytes, total_bytes): (i64, i64) = crate::db::interact(&state.db, move |conn| {
+        conn.query_row(
+            "SELECT received_bytes, total_bytes FROM uploads WHERE id = ?1",
+            params![uid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+    })
+    .await
+    .map_err(|e| match e {
+        AppError::Database(_) => AppError::UploadNotFound(upload_id),
+        other => other,
+    })?;
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -267,16 +253,10 @@ async fn append_chunk(
         .and_then(|v| v.parse().ok())
         .ok_or_else(|| AppError::BadRequest("Missing or invalid Upload-Offset header".into()))?;
 
-    let db = state.db.clone();
     let uid = upload_id.clone();
 
-    let conn = db
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    let (received_bytes, total_bytes, filename, destination): (i64, i64, String, String) = conn
-        .interact(move |conn| {
+    let (received_bytes, total_bytes, filename, destination): (i64, i64, String, String) =
+        crate::db::interact(&state.db, move |conn| {
             conn.query_row(
                 "SELECT received_bytes, total_bytes, filename, destination FROM uploads WHERE id = ?1 AND completed = 0",
                 params![uid],
@@ -284,8 +264,10 @@ async fn append_chunk(
             )
         })
         .await
-        .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
-        .map_err(|_| AppError::UploadNotFound(upload_id.clone()))?;
+        .map_err(|e| match e {
+            AppError::Database(_) => AppError::UploadNotFound(upload_id.clone()),
+            other => other,
+        })?;
 
     if client_offset != received_bytes {
         return Err(AppError::UploadConflict);
@@ -301,53 +283,48 @@ async fn append_chunk(
 
     let cache_dir = state.config.cache_dir.clone();
     let tmp = temp_path(&cache_dir, &upload_id);
-    let tmp_clone = tmp.clone();
-    let buf = body_bytes.to_vec();
 
-    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&tmp_clone)
-            .map_err(AppError::Io)?;
-        file.write_all(&buf).map_err(AppError::Io)?;
-        file.sync_all().map_err(AppError::Io)?;
-        Ok(())
+    tokio::task::spawn_blocking({
+        let tmp = tmp.clone();
+        move || -> Result<(), AppError> {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&tmp)
+                .map_err(AppError::Io)?;
+            file.write_all(&body_bytes).map_err(AppError::Io)?;
+            file.sync_all().map_err(AppError::Io)?;
+            Ok(())
+        }
     })
     .await
     .map_err(|e| AppError::Internal(format!("spawn_blocking error: {e}")))??;
 
     let new_offset = received_bytes + chunk_len;
 
-    let db = state.db.clone();
-    let uid = upload_id.clone();
     let is_complete = new_offset >= total_bytes;
 
-    let conn = db
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    conn.interact(move |conn| {
-        conn.execute(
-            "UPDATE uploads SET received_bytes = ?1, completed = ?2 WHERE id = ?3",
-            params![new_offset, if is_complete { 1 } else { 0 }, uid],
-        )?;
-        Ok::<_, rusqlite::Error>(())
-    })
-    .await
-    .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
-    .map_err(AppError::Database)?;
+    {
+        let uid = upload_id.clone();
+        crate::db::interact(&state.db, move |conn| {
+            conn.execute(
+                "UPDATE uploads SET received_bytes = ?1, completed = ?2 WHERE id = ?3",
+                params![new_offset, if is_complete { 1 } else { 0 }, uid],
+            )?;
+            Ok(())
+        })
+        .await?;
+    }
 
     if is_complete {
         let dest_dir = if destination.is_empty() {
-            state.canonical_root.clone()
+            (*state.canonical_root).clone()
         } else {
             file_ops::safe_resolve(&state.canonical_root, &destination)?
         };
 
         let final_path = dest_dir.join(&filename);
 
-        if !final_path.starts_with(&state.canonical_root) {
+        if !final_path.starts_with(&*state.canonical_root) {
             let _ = tokio::fs::remove_file(&tmp).await;
             return Err(AppError::Forbidden(
                 "Upload destination escapes root directory".into(),
@@ -377,7 +354,7 @@ async fn append_chunk(
 
         let indexer = state.search_indexer.clone();
         let idx_path = final_path
-            .strip_prefix(&state.canonical_root)
+            .strip_prefix(&*state.canonical_root)
             .map_err(|_| AppError::BadRequest("resolved upload path escaped root".into()))?
             .iter()
             .map(|component| component.to_string_lossy())
@@ -405,19 +382,12 @@ async fn cancel_upload(
     State(state): State<AppState>,
     Path(upload_id): Path<String>,
 ) -> Result<Response, AppError> {
-    let db = state.db.clone();
     let uid = upload_id.clone();
 
-    let conn = db
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    let rows_affected = conn
-        .interact(move |conn| conn.execute("DELETE FROM uploads WHERE id = ?1", params![uid]))
-        .await
-        .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
-        .map_err(AppError::Database)?;
+    let rows_affected = crate::db::interact(&state.db, move |conn| {
+        conn.execute("DELETE FROM uploads WHERE id = ?1", params![uid])
+    })
+    .await?;
 
     if rows_affected == 0 {
         return Err(AppError::UploadNotFound(upload_id));
@@ -435,41 +405,43 @@ async fn cancel_upload(
     Ok((StatusCode::NO_CONTENT, resp_headers).into_response())
 }
 
-pub fn spawn_cleanup_task(db: deadpool_sqlite::Pool, cache_dir: String) {
+pub fn spawn_cleanup_task(
+    db: deadpool_sqlite::Pool,
+    cache_dir: String,
+    shutdown: CancellationToken,
+) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
         loop {
-            interval.tick().await;
-
-            if let Err(e) = cleanup_expired(&db, &cache_dir).await {
-                tracing::warn!("TUS cleanup error: {e}");
+            tokio::select! {
+                _ = shutdown.cancelled() => {
+                    tracing::info!("TUS cleanup task shutting down");
+                    break;
+                }
+                _ = interval.tick() => {
+                    if let Err(e) = cleanup_expired(&db, &cache_dir).await {
+                        tracing::warn!("TUS cleanup error: {e}");
+                    }
+                }
             }
         }
     });
 }
 
 async fn cleanup_expired(db: &deadpool_sqlite::Pool, cache_dir: &str) -> Result<(), AppError> {
-    let conn = db
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
     let now = chrono::Utc::now().to_rfc3339();
 
-    let expired_ids: Vec<String> = conn
-        .interact(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id FROM uploads WHERE completed = 0 AND expires_at IS NOT NULL AND expires_at < ?1",
-            )?;
-            let ids = stmt
-                .query_map(params![now], |row| row.get::<_, String>(0))?
-                .filter_map(|r| r.ok())
-                .collect();
-            Ok::<_, rusqlite::Error>(ids)
-        })
-        .await
-        .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
-        .map_err(AppError::Database)?;
+    let expired_ids: Vec<String> = crate::db::interact(db, move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM uploads WHERE completed = 0 AND expires_at IS NOT NULL AND expires_at < ?1",
+        )?;
+        let ids = stmt
+            .query_map(params![now], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(ids)
+    })
+    .await?;
 
     if expired_ids.is_empty() {
         return Ok(());
@@ -482,21 +454,13 @@ async fn cleanup_expired(db: &deadpool_sqlite::Pool, cache_dir: &str) -> Result<
         let _ = tokio::fs::remove_file(&tmp).await;
     }
 
-    let ids = expired_ids.clone();
-    let conn = db
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    conn.interact(move |conn| {
-        for id in &ids {
+    crate::db::interact(db, move |conn| {
+        for id in &expired_ids {
             conn.execute("DELETE FROM uploads WHERE id = ?1", params![id])?;
         }
-        Ok::<_, rusqlite::Error>(())
+        Ok(())
     })
-    .await
-    .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
-    .map_err(AppError::Database)?;
+    .await?;
 
     Ok(())
 }
