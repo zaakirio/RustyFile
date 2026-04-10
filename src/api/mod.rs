@@ -88,8 +88,12 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/health", health::routes())
         .nest("/setup", setup::routes())
         .nest("/auth", auth::routes())
-        .nest("/fs/search", search::routes(state.clone())
-            .route_layer(axum_mw::from_fn_with_state(state.clone(), middleware::rate_limit::api_rate_limit))
+        .nest(
+            "/fs/search",
+            search::routes(state.clone()).route_layer(axum_mw::from_fn_with_state(
+                state.clone(),
+                middleware::rate_limit::api_rate_limit,
+            )),
         )
         .nest("/fs", files::routes(state.clone()))
         // Axum nest doesn't match trailing slash.
@@ -108,11 +112,17 @@ pub fn build_router(state: AppState) -> Router {
 
     let thumb_routes = Router::new()
         .nest("/thumbs", thumbs::routes(state.clone()))
-        .route_layer(axum_mw::from_fn_with_state(state.clone(), middleware::rate_limit::api_rate_limit));
+        .route_layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            middleware::rate_limit::api_rate_limit,
+        ));
 
     let hls_routes = Router::new()
         .nest("/hls", hls::routes(state.clone()))
-        .route_layer(axum_mw::from_fn_with_state(state.clone(), middleware::rate_limit::api_rate_limit));
+        .route_layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            middleware::rate_limit::api_rate_limit,
+        ));
 
     let cors = build_cors_layer(&state.config.cors_origins);
 

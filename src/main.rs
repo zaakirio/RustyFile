@@ -89,7 +89,8 @@ async fn main() -> anyhow::Result<()> {
             .build();
 
     let api_limiter = rustyfile::state::new_rate_limiter(
-        std::num::NonZeroU32::new(config.api_rate_limit).unwrap_or(std::num::NonZeroU32::new(60).unwrap()),
+        std::num::NonZeroU32::new(config.api_rate_limit)
+            .unwrap_or(std::num::NonZeroU32::new(60).unwrap()),
         60,
     );
 
