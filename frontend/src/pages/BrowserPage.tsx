@@ -319,7 +319,7 @@ export default function BrowserPage() {
                 <SearchIcon width={18} height={18} strokeWidth={1.8} />
               </button>
               <button
-                onClick={refresh}
+                onClick={() => refresh()}
                 className="p-2 text-muted hover:text-primary transition-colors"
                 title="Refresh"
               >

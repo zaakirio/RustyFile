@@ -88,8 +88,6 @@ export function useTusUpload({
         endpoint: '/api/tus',
         retryDelays: [0, 1000, 3000, 5000, 10000],
         chunkSize: 5 * 1024 * 1024,
-        // Auth is handled via HttpOnly cookie (sent automatically by the browser).
-        withCredentials: true,
         metadata: {
           filename: item.name,
           destination: dest,
@@ -114,7 +112,7 @@ export function useTusUpload({
           processQueueRef.current()
           checkAllComplete()
         },
-        onError: (err: tus.DetailedError) => {
+        onError: (err: Error | tus.DetailedError) => {
           const current = map.get(id)
           if (!current) return
           current.status = 'error'

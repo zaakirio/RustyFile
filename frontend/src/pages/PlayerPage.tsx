@@ -19,8 +19,6 @@ export default function PlayerPage() {
   // Extract path from URL: /play/path/to/file.mp4 -> "path/to/file.mp4"
   const filePath = extractFsPath(location.pathname, '/play/')
 
-  const fileName = filePath.split('/').pop() ?? 'Unknown'
-
   // Build parent directory path for RETURN navigation
   const parentSegments = filePath.split('/')
   parentSegments.pop()
