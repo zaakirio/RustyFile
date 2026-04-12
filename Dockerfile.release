@@ -1,0 +1,20 @@
+FROM alpine:3.21
+ARG TARGETPLATFORM
+RUN apk add --no-cache ca-certificates ffmpeg \
+    && adduser -D -u 1000 rustyfile \
+    && mkdir -p /data /config \
+    && chown rustyfile:rustyfile /data /config
+COPY build/${TARGETPLATFORM}/rustyfile /usr/local/bin/rustyfile
+
+USER rustyfile
+ENV RUSTYFILE_HOST=0.0.0.0
+ENV RUSTYFILE_PORT=80
+ENV RUSTYFILE_ROOT=/data
+ENV RUSTYFILE_DATA_DIR=/config
+
+EXPOSE 80
+VOLUME ["/data", "/config"]
+
+HEALTHCHECK --interval=30s --timeout=3s CMD wget -q --spider http://localhost:80/api/health || exit 1
+
+ENTRYPOINT ["rustyfile"]

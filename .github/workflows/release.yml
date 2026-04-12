@@ -83,7 +83,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          ARCHIVE="rustyfile-${VERSION}-${{ matrix.platform.target }}"
+          ARCHIVE="rustyfile-${VERSION}-${{ matrix.platform.name }}"
           mkdir -p "dist/${ARCHIVE}"
           if [ -f "target/${{ matrix.platform.target }}/release/rustyfile" ]; then
             cp "target/${{ matrix.platform.target }}/release/rustyfile" "dist/${ARCHIVE}/"
@@ -107,6 +107,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: rustyfile-*
           merge-multiple: true
 
       - name: Create GitHub Release
