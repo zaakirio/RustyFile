@@ -36,7 +36,6 @@ governor = "0.8"
 moka = { version = "0.12", features = ["future"] }
 blake3 = "1.8"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-fast_image_resize = "5"
 notify = "8"
 notify-debouncer-full = "0.5"
 base64 = "0.22"

@@ -33,12 +33,12 @@ Most self-hosted file browsers are written in Go or PHP. RustyFile takes a diffe
 
 - **File browsing** -- navigate directories, view metadata, sort by name/size/date/type
 - **Resumable uploads** -- TUS 1.0.0 protocol with drag-and-drop, progress tracking, and automatic cleanup of expired uploads
-- **Full-text search** -- SQLite FTS5-powered filename search with filters (type, size, date range, path scope)
+- **Filename search** -- SQLite-powered indexed filename search with filters (type, size, date range, path scope)
 - **Video streaming** -- HLS adaptive streaming with on-the-fly transcoding, plus direct MP4/WebM via HTTP Range requests
 - **Thumbnail generation** -- on-demand JPEG thumbnails for images (PNG, JPEG, WebP) with disk caching
 - **In-browser text editing** -- edit code and config files, saved atomically
 - **Authentication** -- JWT (HS256) + Argon2id password hashing, HttpOnly cookie and Bearer token support
-- **File watching** -- filesystem changes automatically update the search index and invalidate directory caches
+- **File watching** -- filesystem changes at the root level automatically update the search index and invalidate directory caches
 - **Rate limiting** -- per-IP login throttling (10 attempts / 15 minutes) via token bucket
 - **Caching** -- ETag conditional requests (304 Not Modified), LRU directory listing cache with TTL, immutable thumbnail cache
 - **Security headers** -- CSP, X-Content-Type-Options, X-Frame-Options, restrictive CORS
@@ -116,10 +116,11 @@ CLI flags  >  Environment variables (RUSTYFILE_*)  >  config.toml  >  Defaults
 | `--max-listing-items` | `RUSTYFILE_MAX_LISTING_ITEMS` | `10000` | Max items in directory listing |
 | `--setup-timeout-minutes` | `RUSTYFILE_SETUP_TIMEOUT_MINUTES` | `5` | Setup wizard timeout |
 | `--tus-expiry-hours` | `RUSTYFILE_TUS_EXPIRY_HOURS` | `24` | Hours before incomplete uploads expire |
-| `--cors-origins` | `RUSTYFILE_CORS_ORIGINS` | `*` | Allowed CORS origins (comma-separated) |
-| `--trusted-proxies` | `RUSTYFILE_TRUSTED_PROXIES` | _(empty)_ | Trusted proxy IPs for X-Forwarded-For (comma-separated) |
+| `--cors-origins` | `RUSTYFILE_CORS_ORIGINS` | `same-origin` | Allowed CORS origins (comma-separated) |
+| `--trusted-proxies` | `RUSTYFILE_TRUSTED_PROXIES` | `127.0.0.1` | Trusted proxy IPs for X-Forwarded-For (comma-separated) |
 | `--secure-cookie` | `RUSTYFILE_SECURE_COOKIE` | `true` | Set Secure flag on auth cookies (disable for HTTP dev) |
-| `--config` | -- | `config.toml` | Config file path |
+| `--blocked-upload-extensions` | `RUSTYFILE_BLOCKED_UPLOAD_EXTENSIONS` | `.php,.phtml,...` | Blocked upload extensions (comma-separated) |
+| `--api-rate-limit` | `RUSTYFILE_API_RATE_LIMIT` | `60` | Max requests per IP per minute for expensive endpoints (search, thumbs, HLS) |
 
 See [`config.toml.example`](config.toml.example) for a full example.
 
@@ -156,7 +157,7 @@ See [`config.toml.example`](config.toml.example) for a full example.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/fs/search?q=...` | Full-text filename search |
+| `GET` | `/api/fs/search?q=...` | Filename search |
 
 Search supports these query parameters: `q` (query), `type` (file/dir/image/video/audio/document), `min_size`, `max_size`, `after`, `before`, `path` (scope to directory), `limit` (default 50), `offset`.
 
@@ -208,17 +209,17 @@ For adaptive streaming, the HLS endpoints transcode video into segments on deman
 
 ### Error Format
 
-All errors return `{ "error": "message", "code": "ERROR_CODE" }`.
+All errors return `{ "error": "message" }`.
 
-| Status | Code | When |
-|--------|------|------|
-| 400 | `VALIDATION_ERROR` | Invalid input |
-| 401 | `UNAUTHORIZED` | Missing or invalid token |
-| 403 | `FORBIDDEN` | Insufficient permissions |
-| 404 | `NOT_FOUND` | Resource doesn't exist |
-| 409 | `CONFLICT` | Resource already exists |
-| 410 | `SETUP_EXPIRED` | Setup timeout elapsed |
-| 500 | `INTERNAL_ERROR` | Server error |
+| Status | When |
+|--------|------|
+| 400 | Invalid input |
+| 401 | Missing or invalid token |
+| 403 | Insufficient permissions |
+| 404 | Resource doesn't exist |
+| 409 | Resource already exists |
+| 410 | Setup timeout elapsed |
+| 500 | Server error |
 
 ## Architecture
 
@@ -226,7 +227,7 @@ All errors return `{ "error": "message", "code": "ERROR_CODE" }`.
 src/
   main.rs                  -- config, logging, DB, filesystem watcher, server startup
   lib.rs                   -- library root
-  config.rs                -- layered config (Figment + Clap), 17 options
+  config.rs                -- layered config (Figment + Clap), 19 options
   error.rs                 -- AppError -> HTTP response mapping
   state.rs                 -- shared state (DB pool, config, JWT secret, rate limiter, caches)
   frontend.rs              -- SPA static file serving (rust-embed)
@@ -237,7 +238,7 @@ src/
     auth.rs                -- JWT login/logout/refresh with rate limiting
     files.rs               -- file CRUD (browse, edit, create, delete, rename)
     download.rs            -- streaming downloads + Range requests + ETag
-    search.rs              -- full-text search endpoint
+    search.rs              -- filename search endpoint
     tus.rs                 -- TUS 1.0.0 resumable upload protocol
     hls.rs                 -- HLS video streaming (playlist + segments)
     thumbs.rs              -- thumbnail generation endpoint
@@ -251,7 +252,7 @@ src/
     mod.rs                 -- service registry
     file_ops.rs            -- path resolution, dir listing, atomic writes
     cache.rs               -- Moka LRU directory listing cache with TTL
-    search_index.rs        -- SQLite FTS5 search index with incremental updates
+    search_index.rs        -- SQLite indexed filename search with incremental updates
     thumbnail.rs           -- image thumbnail generation with disk caching
     transcoder.rs          -- FFmpeg-based HLS video transcoding
 
@@ -263,14 +264,14 @@ frontend/                  -- React 19 + TypeScript + Vite + Tailwind CSS SPA
 | Component | Choice | Why |
 |-----------|--------|-----|
 | Web framework | Axum 0.8 | Tower middleware, Tokio-native |
-| Database | SQLite (rusqlite, bundled) | Zero-dependency, single-file, FTS5 search |
+| Database | SQLite (rusqlite, bundled) | Zero-dependency, single-file, indexed search |
 | Auth | JWT (HS256) + Argon2id | Stateless tokens, modern password hashing |
 | Config | Figment + Clap | Layered: CLI > env > file > defaults |
 | Logging | tracing | Structured, async-aware, JSON output |
 | File I/O | tokio::fs + notify | Async non-blocking I/O with filesystem watching |
 | Caching | Moka + blake3 | LRU with TTL for listings, content-hashed thumbnails |
 | Rate limiting | Governor | Token-bucket per-IP login throttling |
-| Image processing | image + fast_image_resize | Thumbnail generation with concurrency control |
+| Image processing | image | Thumbnail generation with concurrency control |
 | Frontend | React 19, Vite, Tailwind CSS | Embedded SPA via rust-embed, HLS.js + tus-js-client |
 
 ### Security
@@ -278,19 +279,19 @@ frontend/                  -- React 19 + TypeScript + Vite + Tailwind CSS SPA
 - Path traversal prevention -- all paths canonicalized against root
 - `Content-Security-Policy: script-src 'none'` on file downloads
 - `X-Content-Type-Options: nosniff`, `X-Frame-Options`
-- `Cache-Control: no-store` on API responses, `private` on downloads
+- `Cache-Control: no-store` on API responses (except thumbnails/HLS which are `immutable`), `private` on downloads
 - Atomic writes via temp file + rename (no corruption on crash)
 - 5-minute setup timeout, then locked until restart
 - Explicit CORS method/header allowlist
 - Client IP logging via X-Forwarded-For / X-Real-IP with trusted proxy validation
 - HttpOnly, SameSite=Strict auth cookies with optional Secure flag
-- Per-IP rate limiting on login (10 attempts / 15 minutes)
+- Per-IP rate limiting on login (10 attempts / 15 minutes) and expensive API endpoints (60 requests / minute)
 - Argon2 DoS protection via max password length (128)
 - Constant-time password verification (dummy hash fallback on missing user)
 
 ## Development
 
-**Prerequisites:** Rust 1.80+ (`rustup update stable`), Node 22+ and pnpm for frontend work. Optional: `ffmpeg` for HLS video transcoding.
+**Prerequisites:** Rust 1.91.0 (pinned in `rust-toolchain.toml`), Node 22+ and pnpm for frontend work. Optional: `ffmpeg` for HLS video transcoding.
 
 ```bash
 make dev          # frontend dev server + Rust backend in parallel

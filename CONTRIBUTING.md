@@ -6,12 +6,12 @@
 git clone https://github.com/yourorg/rustyfile.git
 cd rustyfile
 cargo build          # Verify it compiles
-cargo test           # Run the test suite (23 integration tests)
+cargo test           # Run the test suite (34 integration tests)
 ```
 
 ### Prerequisites
 
-- **Rust 1.80+** -- install via [rustup](https://rustup.rs/)
+- **Rust 1.91.0** (pinned in `rust-toolchain.toml`) -- install via [rustup](https://rustup.rs/)
 - **cargo-watch** (optional) -- `cargo install cargo-watch` for auto-reload
 
 ### Running Locally
