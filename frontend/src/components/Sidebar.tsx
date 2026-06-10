@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router'
-import { Folder, HardDrive } from 'iconoir-react'
+import { Folder, HardDrive, ShareAndroid } from 'iconoir-react'
 import { api } from '../api/client'
 import type { DirListing } from '../lib/types'
 
@@ -56,6 +56,19 @@ export default function Sidebar() {
         >
           <Folder width={18} height={18} strokeWidth={1.8} />
           Root
+        </NavLink>
+        <NavLink
+          to="/shares"
+          className={({ isActive }) =>
+            `flex items-center gap-3 h-10 px-3 font-mono text-[13px] uppercase tracking-wider transition-colors ${
+              isActive
+                ? 'text-primary bg-surface border border-borders'
+                : 'text-muted border border-transparent hover:bg-surface hover:border-borders'
+            }`
+          }
+        >
+          <ShareAndroid width={18} height={18} strokeWidth={1.8} />
+          Shares
         </NavLink>
         {dirs.map((d) => (
           <NavLink

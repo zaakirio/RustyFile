@@ -90,19 +90,10 @@ async fn browse(
         let cached = state
             .dir_cache
             .get_or_insert(cache_key, || async {
-                let listing = file_ops::list_directory(&root, &resolved_clone, max_items)
-                    .await
-                    .unwrap_or_else(|_| file_ops::DirListing {
-                        path: String::new(),
-                        items: Vec::new(),
-                        num_dirs: 0,
-                        num_files: 0,
-                        total: None,
-                        truncated: false,
-                    });
-                std::sync::Arc::new(listing)
+                let listing = file_ops::list_directory(&root, &resolved_clone, max_items).await?;
+                Ok(std::sync::Arc::new(listing))
             })
-            .await;
+            .await?;
 
         // Sort via an index vector to avoid deep-cloning the entire DirListing.
         let items = &cached.items;

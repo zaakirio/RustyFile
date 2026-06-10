@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use moka::future::Cache;
 
+use crate::error::AppError;
 use crate::services::file_ops::DirListing;
 
 #[derive(Clone)]
@@ -23,12 +24,18 @@ impl DirCache {
         Self { inner }
     }
 
-    pub async fn get_or_insert<F, Fut>(&self, key: String, f: F) -> Arc<DirListing>
+    /// Returns the cached listing or runs `f` to produce one. Only successful
+    /// listings are cached; errors propagate to the caller uncached.
+    pub async fn get_or_insert<F, Fut>(
+        &self,
+        key: String,
+        f: F,
+    ) -> Result<Arc<DirListing>, AppError>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Arc<DirListing>>,
+        Fut: std::future::Future<Output = Result<Arc<DirListing>, AppError>>,
     {
-        self.inner.get_with(key, f()).await
+        self.inner.try_get_with(key, f()).await.map_err(Into::into)
     }
 
     pub async fn invalidate(&self, key: &str) {

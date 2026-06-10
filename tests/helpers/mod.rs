@@ -18,6 +18,9 @@ pub struct TestApp {
     pub root_dir: TempDir,
     pub data_dir: TempDir,
     pub search_indexer: SearchIndexer,
+    /// Direct DB access for tests that need to manipulate rows (e.g. forcing
+    /// a share to be expired).
+    pub db: deadpool_sqlite::Pool,
 }
 
 #[allow(dead_code)]
@@ -112,6 +115,11 @@ impl TestApp {
         let search_indexer = SearchIndexer::new(pool.clone(), canonical_root.clone());
         let search_indexer_for_test = search_indexer.clone();
 
+        let (fs_events, _) =
+            tokio::sync::broadcast::channel(rustyfile::services::watcher::FS_EVENTS_CAPACITY);
+
+        let db_for_test = pool.clone();
+
         let state = AppState {
             db: pool,
             config,
@@ -131,7 +139,12 @@ impl TestApp {
                 60,
             ),
             blocked_extensions,
+            fs_events,
         };
+
+        // Live filesystem watcher, as in production (cache invalidation,
+        // search indexing, SSE events).
+        rustyfile::services::watcher::spawn(&state, tokio_util::sync::CancellationToken::new());
 
         let app = build_router(state);
 
@@ -160,6 +173,7 @@ impl TestApp {
             root_dir,
             data_dir,
             search_indexer: search_indexer_for_test,
+            db: db_for_test,
         }
     }
 

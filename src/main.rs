@@ -12,12 +12,44 @@ use rustyfile::db;
 use rustyfile::services::search_index::SearchIndex;
 use rustyfile::state::{AppState, SetupGuard};
 
+/// Login attempts allowed per IP within the window.
+const LOGIN_LIMITER_BURST: u32 = 10;
+const LOGIN_LIMITER_WINDOW_SECS: u64 = 15 * 60;
+
+/// Fallback API rate limit when the configured value is zero.
+const API_LIMITER_FALLBACK: u32 = 60;
+const API_LIMITER_WINDOW_SECS: u64 = 60;
+
+const DIR_CACHE_CAPACITY: u64 = 1000;
+const DIR_CACHE_TTL_SECS: u64 = 30;
+
+/// Max concurrent thumbnail generations.
+const THUMB_WORKER_CONCURRENCY: usize = 4;
+/// Max thumbnail dimension in pixels.
+const THUMB_MAX_DIMENSION: u32 = 300;
+
+/// Max concurrent ffmpeg transcodes.
+const TRANSCODER_CONCURRENCY: usize = 2;
+/// HLS segment duration in seconds.
+const TRANSCODER_SEGMENT_SECS: u32 = 10;
+
+const HLS_SOURCES_CAPACITY: u64 = 1000;
+/// HLS source mappings expire after this much idle time.
+const HLS_SOURCES_TIME_TO_IDLE_SECS: u64 = 2 * 60 * 60;
+
+const TOKEN_BLOCKLIST_CAPACITY: u64 = 10_000;
+
+/// The filesystem watcher keeps the index fresh in real time; the periodic
+/// full reindex is a safety net for events missed under load.
+const FULL_REINDEX_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load()?;
     init_logging(&config);
 
     tracing::info!("Starting RustyFile v{}", env!("CARGO_PKG_VERSION"));
+    config.log_security_warnings();
 
     tokio::fs::create_dir_all(&config.root).await?;
     tokio::fs::create_dir_all(&config.data_dir).await?;
@@ -55,8 +87,10 @@ async fn main() -> anyhow::Result<()> {
     );
     tracing::info!(canonical_root = %canonical_root.display(), "Root path canonicalized");
 
-    let login_limiter =
-        rustyfile::state::new_rate_limiter(std::num::NonZeroU32::new(10).unwrap(), 15 * 60);
+    let login_limiter = rustyfile::state::new_rate_limiter(
+        std::num::NonZeroU32::new(LOGIN_LIMITER_BURST).unwrap(),
+        LOGIN_LIMITER_WINDOW_SECS,
+    );
 
     // Constant-time login failure (timing-attack mitigation).
     let dummy_hash: Arc<str> = {
@@ -80,37 +114,44 @@ async fn main() -> anyhow::Result<()> {
             .collect(),
     );
 
-    let dir_cache = rustyfile::services::cache::DirCache::new(1000, 30);
+    let dir_cache =
+        rustyfile::services::cache::DirCache::new(DIR_CACHE_CAPACITY, DIR_CACHE_TTL_SECS);
 
     let thumb_cache_dir = std::path::PathBuf::from(&config.data_dir)
         .join("cache")
         .join("thumbs");
     tokio::fs::create_dir_all(&thumb_cache_dir).await?;
     let thumb_worker = rustyfile::services::thumbnail::ThumbWorker::new(
-        4, // max concurrent thumbnail generations
+        THUMB_WORKER_CONCURRENCY,
         thumb_cache_dir,
-        300, // 300px max dimension
+        THUMB_MAX_DIMENSION,
     );
 
     let hls_dir = std::path::PathBuf::from(&config.data_dir)
         .join("cache")
         .join("hls");
     tokio::fs::create_dir_all(&hls_dir).await?;
-    let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(hls_dir, 2, 10);
+    let transcoder = rustyfile::services::transcoder::HlsTranscoder::new(
+        hls_dir,
+        TRANSCODER_CONCURRENCY,
+        TRANSCODER_SEGMENT_SECS,
+    );
     let hls_sources: moka::future::Cache<String, std::path::PathBuf> =
         moka::future::Cache::builder()
-            .max_capacity(1000)
-            .time_to_idle(std::time::Duration::from_secs(2 * 60 * 60))
+            .max_capacity(HLS_SOURCES_CAPACITY)
+            .time_to_idle(std::time::Duration::from_secs(
+                HLS_SOURCES_TIME_TO_IDLE_SECS,
+            ))
             .build();
 
     let api_limiter = rustyfile::state::new_rate_limiter(
         std::num::NonZeroU32::new(config.api_rate_limit)
-            .unwrap_or(std::num::NonZeroU32::new(60).unwrap()),
-        60,
+            .unwrap_or(std::num::NonZeroU32::new(API_LIMITER_FALLBACK).unwrap()),
+        API_LIMITER_WINDOW_SECS,
     );
 
     let token_blocklist: moka::future::Cache<String, ()> = moka::future::Cache::builder()
-        .max_capacity(10_000)
+        .max_capacity(TOKEN_BLOCKLIST_CAPACITY)
         .time_to_live(std::time::Duration::from_secs(
             config.jwt_expiry_hours * 3600,
         ))
@@ -118,6 +159,9 @@ async fn main() -> anyhow::Result<()> {
 
     let search_indexer =
         rustyfile::services::search_index::SearchIndexer::new(pool.clone(), canonical_root.clone());
+
+    let (fs_events, _) =
+        tokio::sync::broadcast::channel(rustyfile::services::watcher::FS_EVENTS_CAPACITY);
 
     let config = Arc::new(config);
 
@@ -137,77 +181,39 @@ async fn main() -> anyhow::Result<()> {
         token_blocklist,
         api_limiter,
         blocked_extensions,
+        fs_events,
     };
 
     // ── Graceful shutdown token ───────────────────────────────────────────────
     let shutdown_token = CancellationToken::new();
 
+    // Full reindex at startup (the interval's first tick fires immediately),
+    // then periodically as a safety net for missed watcher events.
     {
         let indexer = state.search_indexer.clone();
+        let token = shutdown_token.clone();
         tokio::spawn(async move {
-            if let Err(e) = indexer.full_reindex().await {
-                tracing::error!("Search index build failed: {e:#}");
-            }
-        });
-    }
-
-    {
-        use notify::RecursiveMode;
-        use notify_debouncer_full::new_debouncer;
-
-        let dir_cache_watcher = state.dir_cache.clone();
-        let watch_root = state.canonical_root.clone();
-        let search_indexer_watcher = state.search_indexer.clone();
-        let watcher_token = shutdown_token.clone();
-
-        let (tx, mut rx) = tokio::sync::mpsc::channel(256);
-
-        let mut debouncer = new_debouncer(
-            std::time::Duration::from_millis(500),
-            None,
-            move |result: notify_debouncer_full::DebounceEventResult| {
-                let _ = tx.blocking_send(result);
-            },
-        )
-        .expect("Failed to create filesystem watcher");
-
-        debouncer
-            .watch(&*watch_root, RecursiveMode::NonRecursive)
-            .expect("Failed to watch root directory");
-
-        tokio::spawn(async move {
-            let _debouncer = debouncer; // Keep alive
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(FULL_REINDEX_INTERVAL_SECS));
             loop {
                 tokio::select! {
-                    msg = rx.recv() => {
-                        let Some(Ok(events)) = msg else { break };
-                        for event in events {
-                            for path in &event.paths {
-                                if let Some(parent) = path.parent() {
-                                    let key = parent.to_string_lossy().to_string();
-                                    dir_cache_watcher.invalidate(&key).await;
-                                }
-                                if let Ok(rel) = path.strip_prefix(&*watch_root) {
-                                    let rel_str = rel.to_string_lossy().to_string();
-                                    if path.exists() {
-                                        let _ = search_indexer_watcher.upsert(&rel_str).await;
-                                    } else {
-                                        let _ = search_indexer_watcher.remove(&rel_str).await;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ = watcher_token.cancelled() => {
-                        tracing::info!("Filesystem watcher shutting down");
+                    _ = token.cancelled() => {
+                        tracing::info!("Search reindex task shutting down");
                         break;
+                    }
+                    _ = interval.tick() => {
+                        if let Err(e) = indexer.full_reindex().await {
+                            tracing::error!("Search index build failed: {e:#}");
+                        }
                     }
                 }
             }
         });
-
-        tracing::info!("Filesystem watcher active for cache invalidation and search indexing");
     }
+
+    // Debounced filesystem watcher: cache invalidation, search indexing, and
+    // live SSE events.
+    rustyfile::services::watcher::spawn(&state, shutdown_token.clone());
 
     // ── Background cleanup tasks ──────────────────────────────────────────────
     api::tus::spawn_cleanup_task(
@@ -215,6 +221,9 @@ async fn main() -> anyhow::Result<()> {
         state.config.cache_dir.clone(),
         shutdown_token.clone(),
     );
+
+    // Expired share links 404 lazily; this daily sweep removes dead rows.
+    api::shares::spawn_cleanup_task(state.db.clone(), shutdown_token.clone());
 
     // HLS segment cleanup (every 30 min, removes dirs older than 2h).
     {
@@ -232,6 +241,13 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(rustyfile::services::thumbnail::cleanup_thumbnails(
             thumb_dir, token,
         ));
+    }
+
+    // Rate-limiter key eviction (every 5 min, drops idle per-IP buckets).
+    {
+        let limiters = vec![state.login_limiter.clone(), state.api_limiter.clone()];
+        let token = shutdown_token.clone();
+        tokio::spawn(rustyfile::state::rate_limiter_maintenance(limiters, token));
     }
 
     let app = api::build_router(state);

@@ -1,11 +1,11 @@
 import { NavLink, useLocation } from 'react-router'
-import { Folder, EditPencil, MediaVideo, Bookmark } from 'iconoir-react'
+import { Folder, EditPencil, MediaVideo, ShareAndroid } from 'iconoir-react'
 
 const TABS = [
   { to: '/browse', label: 'BROWSE', icon: Folder, needsFile: false },
   { to: '/edit', label: 'EDITOR', icon: EditPencil, needsFile: true },
   { to: '/play', label: 'MEDIA', icon: MediaVideo, needsFile: true },
-  { to: '/stash', label: 'STASH', icon: Bookmark, needsFile: false },
+  { to: '/shares', label: 'SHARES', icon: ShareAndroid, needsFile: false },
 ] as const
 
 export default function BottomNav() {

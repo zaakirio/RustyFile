@@ -23,6 +23,27 @@ pub fn check_blocked_extension(filename: &str, blocked: &HashSet<String>) -> Res
     Ok(())
 }
 
+/// Reduces a client-supplied filename to its final path component and
+/// rejects empty/`.`/`..`/NUL results. Shared by TUS uploads and anonymous
+/// share drop uploads: any traversal attempt collapses to a bare name.
+pub(crate) fn sanitize_filename(raw: &str) -> Result<String, AppError> {
+    let name = Path::new(raw)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    if name.is_empty() || name == "." || name == ".." {
+        return Err(AppError::BadRequest("Invalid filename".into()));
+    }
+
+    if name.as_bytes().contains(&0) {
+        return Err(AppError::BadRequest("Invalid filename: null bytes".into()));
+    }
+
+    Ok(name)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
     pub name: String,
@@ -169,8 +190,14 @@ pub(crate) async fn list_directory(
             continue;
         }
 
-        let metadata = entry.metadata().await.map_err(AppError::Io)?;
         let entry_path = entry.path();
+
+        // symlink_metadata never follows links: symlinks are still listed,
+        // but a symlinked directory is classified as a plain entry rather
+        // than a traversable directory.
+        let metadata = tokio::fs::symlink_metadata(&entry_path)
+            .await
+            .map_err(AppError::Io)?;
 
         items.push(FileEntry::from_path_and_metadata(
             canonical_root,
@@ -380,4 +407,87 @@ fn detect_subtitles_sync(video_path: &Path) -> Vec<String> {
 
     subtitles.sort();
     subtitles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Canonicalized temp root (macOS tempdirs live behind a /var symlink).
+    fn temp_root() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        (dir, root)
+    }
+
+    #[test]
+    fn resolves_existing_path_inside_root() {
+        let (_dir, root) = temp_root();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/file.txt"), b"hi").unwrap();
+
+        let resolved = safe_resolve(&root, "sub/file.txt").unwrap();
+        assert_eq!(resolved, root.join("sub/file.txt"));
+    }
+
+    #[test]
+    fn resolves_non_existent_path_inside_root() {
+        let (_dir, root) = temp_root();
+
+        let resolved = safe_resolve(&root, "does/not/exist.txt").unwrap();
+        assert_eq!(resolved, root.join("does/not/exist.txt"));
+    }
+
+    #[test]
+    fn traversal_components_are_stripped() {
+        let (_dir, root) = temp_root();
+
+        for attempt in ["../../etc/passwd", "a/../../b", "/etc/passwd", "./../x"] {
+            let resolved = safe_resolve(&root, attempt).unwrap();
+            assert!(
+                resolved.starts_with(&root),
+                "{attempt} escaped root: {}",
+                resolved.display()
+            );
+        }
+    }
+
+    #[test]
+    fn null_bytes_rejected() {
+        let (_dir, root) = temp_root();
+        let err = safe_resolve(&root, "file\0.txt").unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn backslashes_rejected() {
+        let (_dir, root) = temp_root();
+        let err = safe_resolve(&root, "dir\\file.txt").unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_escaping_root_rejected() {
+        let (_dir, root) = temp_root();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), b"secret").unwrap();
+
+        std::os::unix::fs::symlink(outside.path(), root.join("escape")).unwrap();
+
+        let err = safe_resolve(&root, "escape/secret.txt").unwrap_err();
+        assert!(matches!(err, AppError::Forbidden(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_within_root_allowed() {
+        let (_dir, root) = temp_root();
+        std::fs::write(root.join("real.txt"), b"hi").unwrap();
+        std::os::unix::fs::symlink(root.join("real.txt"), root.join("alias.txt")).unwrap();
+
+        let resolved = safe_resolve(&root, "alias.txt").unwrap();
+        assert!(resolved.starts_with(&root));
+        assert_eq!(resolved, root.join("real.txt"));
+    }
 }

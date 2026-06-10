@@ -6,6 +6,11 @@ use tokio::sync::Semaphore;
 
 const HASH_PREFIX_LEN: usize = 24;
 
+// Decode limits guard against decompression bombs (tiny files that expand to
+// enormous pixel buffers).
+const MAX_SOURCE_DIMENSION: u32 = 16_384;
+const MAX_DECODE_ALLOC_BYTES: u64 = 256 * 1024 * 1024;
+
 #[async_trait::async_trait]
 pub trait ThumbnailGenerator: Send + Sync {
     async fn get_or_generate(&self, source: &Path) -> Result<PathBuf, ThumbnailError>;
@@ -59,7 +64,7 @@ impl ThumbnailGenerator for ThumbWorker {
         let cache_key = self.cache_key(source).await?;
         let cached_path = self.cache_dir.join(format!("{cache_key}.jpg"));
 
-        if cached_path.exists() {
+        if tokio::fs::try_exists(&cached_path).await.unwrap_or(false) {
             return Ok(cached_path);
         }
 
@@ -70,7 +75,7 @@ impl ThumbnailGenerator for ThumbWorker {
             .map_err(|_| ThumbnailError::Unavailable)?;
 
         // Double-check after acquiring permit
-        if cached_path.exists() {
+        if tokio::fs::try_exists(&cached_path).await.unwrap_or(false) {
             return Ok(cached_path);
         }
 
@@ -91,7 +96,20 @@ fn generate_image_thumbnail(
     output: &Path,
     max_dim: u32,
 ) -> Result<(), ThumbnailError> {
-    let img = image::open(source).map_err(|_| ThumbnailError::GenerationFailed)?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_SOURCE_DIMENSION);
+    limits.max_image_height = Some(MAX_SOURCE_DIMENSION);
+    limits.max_alloc = Some(MAX_DECODE_ALLOC_BYTES);
+
+    let mut reader = image::ImageReader::open(source)
+        .map_err(|_| ThumbnailError::GenerationFailed)?
+        .with_guessed_format()
+        .map_err(|_| ThumbnailError::GenerationFailed)?;
+    reader.limits(limits);
+
+    let img = reader
+        .decode()
+        .map_err(|_| ThumbnailError::GenerationFailed)?;
     let thumb = img.thumbnail(max_dim, max_dim);
 
     let mut buf = Cursor::new(Vec::new());
@@ -99,10 +117,18 @@ fn generate_image_thumbnail(
         .write_to(&mut buf, image::ImageFormat::Jpeg)
         .map_err(|_| ThumbnailError::GenerationFailed)?;
 
-    if let Some(parent) = output.parent() {
-        std::fs::create_dir_all(parent).ok();
+    let parent = output.parent().ok_or(ThumbnailError::GenerationFailed)?;
+    std::fs::create_dir_all(parent).ok();
+
+    // Write to a temp file, then rename: concurrent readers never see a
+    // truncated thumbnail.
+    let tmp_name = format!(".rustyfile_tmp_{}", uuid::Uuid::new_v4().as_hyphenated());
+    let tmp_path = parent.join(tmp_name);
+    std::fs::write(&tmp_path, buf.into_inner()).map_err(|_| ThumbnailError::GenerationFailed)?;
+    if std::fs::rename(&tmp_path, output).is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(ThumbnailError::GenerationFailed);
     }
-    std::fs::write(output, buf.into_inner()).map_err(|_| ThumbnailError::GenerationFailed)?;
 
     Ok(())
 }

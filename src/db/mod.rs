@@ -1,3 +1,4 @@
+pub mod share_repo;
 pub mod user_repo;
 
 use deadpool_sqlite::{Config, Pool, PoolConfig, Runtime};
@@ -7,12 +8,16 @@ use rusqlite::params;
 use crate::config::AppConfig;
 use crate::error::AppError;
 
+/// SQLite is single-writer; a small pool covers concurrent readers without
+/// piling up blocked writer connections.
+const DB_POOL_MAX_SIZE: usize = 4;
+
 pub fn create_pool(config: &AppConfig) -> anyhow::Result<Pool> {
     let db_path = config.db_path();
 
     let mut cfg = Config::new(&db_path);
     cfg.pool = Some(PoolConfig {
-        max_size: 4,
+        max_size: DB_POOL_MAX_SIZE,
         ..Default::default()
     });
     let pool = cfg.create_pool(Runtime::Tokio1)?;
@@ -32,14 +37,8 @@ where
     F: FnOnce(&mut rusqlite::Connection) -> Result<T, rusqlite::Error> + Send + 'static,
     T: Send + 'static,
 {
-    let conn = pool
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    conn.interact(f)
-        .await
-        .map_err(|e| AppError::Internal(format!("interact error: {e}")))?
-        .map_err(AppError::Database)
+    let conn = pool.get().await?;
+    Ok(conn.interact(f).await??)
 }
 
 pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
@@ -102,6 +101,24 @@ pub async fn run_migrations(pool: &Pool) -> anyhow::Result<()> {
             conn.execute_batch(include_str!("../../migrations/V3__search_index.sql"))?;
             conn.execute(
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', 3)",
+                [],
+            )?;
+        }
+
+        if current_version < 4 {
+            tracing::info!("Applying migration V4: share links");
+            conn.execute_batch(include_str!("../../migrations/V4__shares.sql"))?;
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', 4)",
+                [],
+            )?;
+        }
+
+        if current_version < 5 {
+            tracing::info!("Applying migration V5: full-text content search");
+            conn.execute_batch(include_str!("../../migrations/V5__content_fts.sql"))?;
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', 5)",
                 [],
             )?;
         }

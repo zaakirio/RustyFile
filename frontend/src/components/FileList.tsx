@@ -10,6 +10,8 @@ interface FileListProps {
   onDelete: (path: string) => void
   selected: Set<string>
   onToggleSelect: (path: string) => void
+  onExtract?: (path: string) => void
+  onShare?: (entry: FileEntry) => void
 }
 
 export default function FileList({
@@ -20,7 +22,19 @@ export default function FileList({
   onDelete,
   selected,
   onToggleSelect,
+  onExtract,
+  onShare,
 }: FileListProps) {
+  // Sort: directories first, then files, both alphabetically
+  const items = listing?.items
+  const sorted = useMemo(
+    () => [...(items ?? [])].sort((a, b) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
+      return a.name.localeCompare(b.name)
+    }),
+    [items]
+  )
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -51,15 +65,6 @@ export default function FileList({
     )
   }
 
-  // Sort: directories first, then files, both alphabetically
-  const sorted = useMemo(
-    () => [...listing.items].sort((a, b) => {
-      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
-      return a.name.localeCompare(b.name)
-    }),
-    [listing.items]
-  )
-
   const selectMode = selected.size > 0
 
   return (
@@ -88,6 +93,8 @@ export default function FileList({
           isSelected={selected.has(entry.path)}
           selectMode={selectMode}
           onToggleSelect={onToggleSelect}
+          onExtract={onExtract}
+          onShare={onShare}
         />
       ))}
 

@@ -9,7 +9,7 @@ default = ["embed-frontend"]
 embed-frontend = ["dep:rust-embed"]
 
 [dependencies]
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "multipart"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 tower = { version = "0.5", features = ["timeout"] }
 tower-http = { version = "0.6", features = ["cors", "compression-gzip", "compression-br", "trace", "set-header", "limit", "timeout"] }
@@ -44,9 +44,12 @@ futures-util = "0.3.32"
 http-body-util = "0.1"
 rust-embed = { version = "8", features = ["compression"], optional = true }
 async-trait = "0.1.89"
+zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
+flate2 = "1.1.9"
+tar = "0.4.46"
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls", "stream", "multipart"] }
 tempfile = "3"
 tokio-test = "0.4"
 

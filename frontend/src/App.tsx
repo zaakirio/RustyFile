@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router'
-import { AuthProvider, useAuth } from './hooks/useAuth'
+import { AuthProvider } from './hooks/useAuth'
+import { useAuth } from './hooks/auth-context'
 import ErrorBoundary from './components/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
@@ -9,6 +10,8 @@ const BrowserPage = lazy(() => import('./pages/BrowserPage'))
 const EditorPage = lazy(() => import('./pages/EditorPage'))
 const PlayerPage = lazy(() => import('./pages/PlayerPage'))
 const PreviewPage = lazy(() => import('./pages/PreviewPage'))
+const SharesPage = lazy(() => import('./pages/SharesPage'))
+const SharePage = lazy(() => import('./pages/SharePage'))
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -46,6 +49,11 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Public share landing page — recipients are anonymous, no auth gate. */}
+      <Route
+        path="/share/:token"
+        element={<Suspense fallback={<LoadingScreen />}><SharePage /></Suspense>}
+      />
       <Route
         element={
           <RequireAuth>
@@ -57,6 +65,7 @@ function AppRoutes() {
         <Route path="/edit/*" element={<Suspense fallback={<LoadingScreen />}><EditorPage /></Suspense>} />
         <Route path="/play/*" element={<Suspense fallback={<LoadingScreen />}><PlayerPage /></Suspense>} />
         <Route path="/preview/*" element={<Suspense fallback={<LoadingScreen />}><PreviewPage /></Suspense>} />
+        <Route path="/shares" element={<Suspense fallback={<LoadingScreen />}><SharesPage /></Suspense>} />
         <Route
           path="/stash/*"
           element={

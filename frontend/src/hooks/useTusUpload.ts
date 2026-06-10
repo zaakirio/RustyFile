@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import * as tus from 'tus-js-client'
 
 export interface UploadItem {
@@ -35,11 +35,13 @@ export function useTusUpload({
 
   // Store currentPath and onAllComplete in refs so callbacks always see latest values
   const currentPathRef = useRef(currentPath)
-  currentPathRef.current = currentPath
   const onAllCompleteRef = useRef(onAllComplete)
-  onAllCompleteRef.current = onAllComplete
   const maxConcurrentRef = useRef(maxConcurrent)
-  maxConcurrentRef.current = maxConcurrent
+  useEffect(() => {
+    currentPathRef.current = currentPath
+    onAllCompleteRef.current = onAllComplete
+    maxConcurrentRef.current = maxConcurrent
+  }, [currentPath, onAllComplete, maxConcurrent])
 
   const toPublic = (item: InternalItem): UploadItem => ({
     id: item.id,
@@ -133,7 +135,9 @@ export function useTusUpload({
 
   // Keep startUpload ref current for processQueue
   const startUploadRef = useRef(startUpload)
-  startUploadRef.current = startUpload
+  useEffect(() => {
+    startUploadRef.current = startUpload
+  }, [startUpload])
 
   const processQueue = useCallback(() => {
     const map = internalRef.current
@@ -145,7 +149,9 @@ export function useTusUpload({
   }, [])
 
   // Keep processQueue ref current for tus callbacks
-  processQueueRef.current = processQueue
+  useEffect(() => {
+    processQueueRef.current = processQueue
+  }, [processQueue])
 
   const addFiles = useCallback(
     (files: File[]) => {

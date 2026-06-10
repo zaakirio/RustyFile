@@ -1,10 +1,11 @@
-import { useState, memo } from 'react'
-import { Trash, Download, EditPencil } from 'iconoir-react'
+import { useState, memo, createElement } from 'react'
+import { Trash, Download, EditPencil, Expand, ShareAndroid } from 'iconoir-react'
 import type { FileEntry } from '../lib/types'
 import { formatSize, formatDate } from '../lib/format'
 import { getFileIcon } from '../lib/icons'
 import { isTextFile } from '../lib/paths'
 import { encodeFsPath } from '../lib/paths'
+import { isExtractableArchive, directoryZipUrl } from '../lib/archive'
 
 interface FileRowProps {
   entry: FileEntry
@@ -14,6 +15,22 @@ interface FileRowProps {
   selectMode: boolean
   onToggleSelect: (path: string) => void
   showFullPath?: boolean
+  onExtract?: (path: string) => void
+  onShare?: (entry: FileEntry) => void
+}
+
+interface FileIconProps {
+  entry: FileEntry
+  width: number
+  height: number
+  strokeWidth: number
+  className?: string
+}
+
+function FileIcon({ entry, ...svgProps }: FileIconProps) {
+  // getFileIcon returns a statically defined icon component from a lookup
+  // table (it never creates components), so rendering it here is safe.
+  return createElement(getFileIcon(entry), svgProps)
 }
 
 export default memo(function FileRow({
@@ -24,9 +41,10 @@ export default memo(function FileRow({
   selectMode,
   onToggleSelect,
   showFullPath,
+  onExtract,
+  onShare,
 }: FileRowProps) {
   const [hovered, setHovered] = useState(false)
-  const Icon = getFileIcon(entry)
 
   const handleClick = () => {
     if (selectMode) {
@@ -63,7 +81,8 @@ export default memo(function FileRow({
               className="w-3.5 h-3.5 accent-[var(--color-primary)] cursor-pointer"
             />
           </label>
-          <Icon
+          <FileIcon
+            entry={entry}
             width={18}
             height={18}
             strokeWidth={1.8}
@@ -113,17 +132,49 @@ export default memo(function FileRow({
               <EditPencil width={14} height={14} strokeWidth={2} />
             </button>
           )}
-          {!entry.is_dir && (
-            <a
-              href={`/api/fs/download/${encodeFsPath(entry.path)}`}
-              onClick={(e) => e.stopPropagation()}
+          {onExtract && isExtractableArchive(entry) && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onExtract(entry.path)
+              }}
               className="p-1.5 text-muted hover:text-primary transition-colors"
-              title="Download"
-              aria-label={`Download ${entry.name}`}
+              title="Extract here"
+              aria-label={`Extract ${entry.name}`}
             >
-              <Download width={14} height={14} strokeWidth={2} />
-            </a>
+              <Expand width={14} height={14} strokeWidth={2} />
+            </button>
           )}
+          {onShare && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onShare(entry)
+              }}
+              className="p-1.5 text-muted hover:text-primary transition-colors"
+              title="Share"
+              aria-label={`Share ${entry.name}`}
+            >
+              <ShareAndroid width={14} height={14} strokeWidth={2} />
+            </button>
+          )}
+          <a
+            href={
+              entry.is_dir
+                ? directoryZipUrl(entry.path)
+                : `/api/fs/download/${encodeFsPath(entry.path)}`
+            }
+            onClick={(e) => e.stopPropagation()}
+            className="p-1.5 text-muted hover:text-primary transition-colors"
+            title={entry.is_dir ? 'Download as ZIP' : 'Download'}
+            aria-label={
+              entry.is_dir ? `Download ${entry.name} as ZIP` : `Download ${entry.name}`
+            }
+          >
+            <Download width={14} height={14} strokeWidth={2} />
+          </a>
           <button
             type="button"
             onClick={(e) => {
@@ -156,7 +207,8 @@ export default memo(function FileRow({
             />
           </label>
         )}
-        <Icon
+        <FileIcon
+          entry={entry}
           width={20}
           height={20}
           strokeWidth={1.8}

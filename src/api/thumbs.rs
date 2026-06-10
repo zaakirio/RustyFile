@@ -12,6 +12,9 @@ use crate::services::file_ops;
 use crate::services::thumbnail::ThumbnailGenerator;
 use crate::state::AppState;
 
+/// Thumbnails are content-addressed by source path, so clients may cache for a day.
+const THUMB_CACHE_CONTROL: &str = "public, max-age=86400, immutable";
+
 async fn thumbnail(
     State(state): State<AppState>,
     Path(user_path): Path<String>,
@@ -28,13 +31,12 @@ async fn thumbnail(
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
 
-    Response::builder()
+    Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "image/jpeg")
         .header(header::CONTENT_LENGTH, meta.len())
-        .header(header::CACHE_CONTROL, "public, max-age=86400, immutable")
-        .body(body)
-        .map_err(|e| AppError::Internal(e.to_string()))
+        .header(header::CACHE_CONTROL, THUMB_CACHE_CONTROL)
+        .body(body)?)
 }
 
 pub fn routes(state: AppState) -> Router<AppState> {

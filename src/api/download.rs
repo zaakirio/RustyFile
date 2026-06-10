@@ -68,7 +68,7 @@ fn parse_range(header: &str, file_size: u64) -> Option<ByteRange> {
     }
 }
 
-fn content_disposition(filename: &str, inline: bool) -> String {
+pub(crate) fn content_disposition(filename: &str, inline: bool) -> String {
     let disposition_type = if inline { "inline" } else { "attachment" };
 
     let ascii_name: String = filename
@@ -104,7 +104,18 @@ async fn download(
     Extension(_user): Extension<user_repo::User>,
 ) -> Result<Response<Body>, AppError> {
     let resolved = file_ops::safe_resolve(&state.canonical_root, &user_path)?;
+    stream_file_response(resolved, &headers, query.inline.unwrap_or(false)).await
+}
 
+/// Streams a regular file with ETag/Last-Modified conditionals, Range
+/// support, Content-Disposition and download-hardening headers. Shared by the
+/// authenticated download endpoint and public share downloads (which always
+/// pass `inline_requested = false`).
+pub(crate) async fn stream_file_response(
+    resolved: std::path::PathBuf,
+    headers: &HeaderMap,
+    inline_requested: bool,
+) -> Result<Response<Body>, AppError> {
     let metadata = tokio::fs::metadata(&resolved)
         .await
         .map_err(|_| AppError::NotFound("File not found".into()))?;
@@ -133,11 +144,10 @@ async fn download(
         .and_then(|v| v.to_str().ok())
     {
         if if_none_match == etag || if_none_match == "*" {
-            return Response::builder()
+            return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
                 .header(header::ETAG, &etag)
-                .body(Body::empty())
-                .map_err(|e| AppError::Internal(e.to_string()));
+                .body(Body::empty())?);
         }
     }
 
@@ -147,11 +157,10 @@ async fn download(
     {
         if let Ok(ims_time) = chrono::DateTime::parse_from_rfc2822(ims) {
             if modified <= ims_time {
-                return Response::builder()
+                return Ok(Response::builder()
                     .status(StatusCode::NOT_MODIFIED)
                     .header(header::ETAG, &etag)
-                    .body(Body::empty())
-                    .map_err(|e| AppError::Internal(e.to_string()));
+                    .body(Body::empty())?);
             }
         }
     }
@@ -165,7 +174,17 @@ async fn download(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "download".into());
 
-    let inline = query.inline.unwrap_or(false);
+    // HTML/SVG/XML execute scripts when rendered inline, so force a download
+    // for those types regardless of ?inline=true.
+    const FORCE_ATTACHMENT_MIMES: [&str; 5] = [
+        "text/html",
+        "application/xhtml+xml",
+        "image/svg+xml",
+        "text/xml",
+        "application/xml",
+    ];
+
+    let inline = inline_requested && !FORCE_ATTACHMENT_MIMES.contains(&mime.as_str());
     let disposition = content_disposition(&filename, inline);
 
     let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
@@ -185,11 +204,10 @@ async fn download(
         }
         None if range_header.is_some() => {
             let body = Body::empty();
-            Response::builder()
+            Ok(Response::builder()
                 .status(StatusCode::RANGE_NOT_SATISFIABLE)
                 .header(header::CONTENT_RANGE, format!("bytes */{file_size}"))
-                .body(body)
-                .map_err(|e| AppError::Internal(e.to_string()))
+                .body(body)?)
         }
         None => {
             serve_full(
@@ -217,7 +235,7 @@ async fn serve_full(
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
 
-    Response::builder()
+    Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime)
         .header(header::CONTENT_LENGTH, file_size)
@@ -228,8 +246,7 @@ async fn serve_full(
         .header(header::ETAG, etag)
         .header("Content-Security-Policy", "script-src 'none';")
         .header("X-Content-Type-Options", "nosniff")
-        .body(body)
-        .map_err(|e| AppError::Internal(e.to_string()))
+        .body(body)?)
 }
 
 async fn serve_partial(
@@ -255,7 +272,7 @@ async fn serve_partial(
 
     let content_range = format!("bytes {}-{}/{file_size}", range.start, range.end);
 
-    Response::builder()
+    Ok(Response::builder()
         .status(StatusCode::PARTIAL_CONTENT)
         .header(header::CONTENT_TYPE, mime)
         .header(header::CONTENT_LENGTH, chunk_size)
@@ -267,12 +284,74 @@ async fn serve_partial(
         .header(header::ETAG, etag)
         .header("Content-Security-Policy", "script-src 'none';")
         .header("X-Content-Type-Options", "nosniff")
-        .body(body)
-        .map_err(|e| AppError::Internal(e.to_string()))
+        .body(body)?)
 }
 
 pub fn routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/{*path}", get(download))
         .route_layer(middleware::from_fn_with_state(state, require_auth))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normal_range() {
+        let range = parse_range("bytes=0-499", 1000).unwrap();
+        assert_eq!(range.start, 0);
+        assert_eq!(range.end, 499);
+    }
+
+    #[test]
+    fn open_ended_range() {
+        let range = parse_range("bytes=500-", 1000).unwrap();
+        assert_eq!(range.start, 500);
+        assert_eq!(range.end, 999);
+    }
+
+    #[test]
+    fn suffix_range() {
+        let range = parse_range("bytes=-200", 1000).unwrap();
+        assert_eq!(range.start, 800);
+        assert_eq!(range.end, 999);
+    }
+
+    #[test]
+    fn suffix_longer_than_file_rejected() {
+        assert!(parse_range("bytes=-2000", 1000).is_none());
+    }
+
+    #[test]
+    fn zero_suffix_rejected() {
+        assert!(parse_range("bytes=-0", 1000).is_none());
+    }
+
+    #[test]
+    fn end_clamped_to_file_size() {
+        let range = parse_range("bytes=900-5000", 1000).unwrap();
+        assert_eq!(range.start, 900);
+        assert_eq!(range.end, 999);
+    }
+
+    #[test]
+    fn start_past_eof_rejected() {
+        assert!(parse_range("bytes=1000-", 1000).is_none());
+        assert!(parse_range("bytes=1000-1500", 1000).is_none());
+    }
+
+    #[test]
+    fn inverted_range_rejected() {
+        assert!(parse_range("bytes=500-100", 1000).is_none());
+    }
+
+    #[test]
+    fn invalid_inputs_rejected() {
+        assert!(parse_range("items=0-499", 1000).is_none()); // wrong unit
+        assert!(parse_range("bytes=abc-def", 1000).is_none()); // non-numeric
+        assert!(parse_range("bytes=0-99,200-299", 1000).is_none()); // multipart
+        assert!(parse_range("bytes=-", 1000).is_none()); // empty both sides
+        assert!(parse_range("bytes=", 1000).is_none()); // no range at all
+    }
 }

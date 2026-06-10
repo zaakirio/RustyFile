@@ -1,3 +1,5 @@
+use std::sync::{Arc, LazyLock};
+
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
@@ -7,9 +9,10 @@ use axum::routing::{delete, head, options, patch, post};
 use axum::Router;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use http_body_util::BodyExt;
+use dashmap::DashMap;
+use futures_util::StreamExt;
 use rusqlite::params;
-use std::io::Write;
+use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::api::middleware::auth::require_auth;
@@ -22,22 +25,18 @@ const TUS_RESUMABLE: &str = "1.0.0";
 const TUS_VERSION: &str = "1.0.0";
 const TUS_EXTENSION: &str = "creation,termination";
 
-fn sanitize_filename(raw: &str) -> Result<String, AppError> {
-    let name = std::path::Path::new(raw)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|s| s.to_string())
-        .unwrap_or_default();
+/// Per-upload-id locks serializing the check-append-update section of
+/// `append_chunk`, so concurrent PATCHes for the same upload cannot race
+/// between the offset read, file append, and offset update. Entries are
+/// removed on completion/cancel to avoid unbounded growth.
+static UPLOAD_LOCKS: LazyLock<DashMap<String, Arc<tokio::sync::Mutex<()>>>> =
+    LazyLock::new(DashMap::new);
 
-    if name.is_empty() || name == "." || name == ".." {
-        return Err(AppError::BadRequest("Invalid filename".into()));
-    }
-
-    if name.as_bytes().contains(&0) {
-        return Err(AppError::BadRequest("Invalid filename: null bytes".into()));
-    }
-
-    Ok(name)
+fn upload_lock(upload_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    UPLOAD_LOCKS
+        .entry(upload_id.to_string())
+        .or_default()
+        .clone()
 }
 
 pub fn routes(state: AppState) -> Router<AppState> {
@@ -132,7 +131,7 @@ async fn create_upload(
         .map(|i| metadata.swap_remove(i).1)
         .ok_or_else(|| AppError::BadRequest("Upload-Metadata must include 'filename'".into()))?;
 
-    let filename = sanitize_filename(&raw_filename)?;
+    let filename = file_ops::sanitize_filename(&raw_filename)?;
 
     file_ops::check_blocked_extension(&filename, &state.blocked_extensions)?;
 
@@ -208,7 +207,9 @@ async fn query_offset(
     })
     .await
     .map_err(|e| match e {
-        AppError::Database(_) => AppError::UploadNotFound(upload_id),
+        AppError::Database(rusqlite::Error::QueryReturnedNoRows) => {
+            AppError::UploadNotFound(upload_id)
+        }
         other => other,
     })?;
 
@@ -253,6 +254,11 @@ async fn append_chunk(
         .and_then(|v| v.parse().ok())
         .ok_or_else(|| AppError::BadRequest("Missing or invalid Upload-Offset header".into()))?;
 
+    // Serialize the offset check, file append, and offset update per upload-id
+    // so concurrent PATCHes cannot interleave and corrupt the temp file.
+    let lock = upload_lock(&upload_id);
+    let _guard = lock.lock().await;
+
     let uid = upload_id.clone();
 
     let (received_bytes, total_bytes, filename, destination): (i64, i64, String, String) =
@@ -265,7 +271,9 @@ async fn append_chunk(
         })
         .await
         .map_err(|e| match e {
-            AppError::Database(_) => AppError::UploadNotFound(upload_id.clone()),
+            AppError::Database(rusqlite::Error::QueryReturnedNoRows) => {
+                AppError::UploadNotFound(upload_id.clone())
+            }
             other => other,
         })?;
 
@@ -273,31 +281,65 @@ async fn append_chunk(
         return Err(AppError::UploadConflict);
     }
 
-    let body_bytes = body
-        .collect()
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
-
-    let chunk_len = body_bytes.len() as i64;
-
     let cache_dir = state.config.cache_dir.clone();
     let tmp = temp_path(&cache_dir, &upload_id);
 
-    tokio::task::spawn_blocking({
-        let tmp = tmp.clone();
-        move || -> Result<(), AppError> {
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&tmp)
-                .map_err(AppError::Io)?;
-            file.write_all(&body_bytes).map_err(AppError::Io)?;
-            file.sync_all().map_err(AppError::Io)?;
-            Ok(())
+    // Stream the chunk to disk instead of buffering it in RAM. On any failure
+    // (body error, IO error, or the chunk overflowing the declared
+    // Upload-Length) truncate back to the recorded offset so the temp file
+    // stays consistent with the DB state.
+    let chunk_len = {
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&tmp)
+            .await
+            .map_err(AppError::Io)?;
+
+        let max_chunk = total_bytes - received_bytes;
+        let mut written: i64 = 0;
+        let mut stream = body.into_data_stream();
+        let mut failure: Option<AppError> = None;
+
+        while let Some(chunk) = stream.next().await {
+            let bytes = match chunk {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    failure = Some(AppError::BadRequest(format!(
+                        "Failed to read request body: {e}"
+                    )));
+                    break;
+                }
+            };
+
+            written += bytes.len() as i64;
+            if written > max_chunk {
+                failure = Some(AppError::BadRequest(format!(
+                    "Chunk exceeds declared Upload-Length ({total_bytes})"
+                )));
+                break;
+            }
+
+            if let Err(e) = file.write_all(&bytes).await {
+                failure = Some(AppError::Io(e));
+                break;
+            }
         }
-    })
-    .await
-    .map_err(|e| AppError::Internal(format!("spawn_blocking error: {e}")))??;
+
+        if failure.is_none() {
+            if let Err(e) = file.flush().await {
+                failure = Some(AppError::Io(e));
+            }
+        }
+
+        if let Some(err) = failure {
+            let _ = file.set_len(received_bytes as u64).await;
+            let _ = file.sync_all().await;
+            return Err(err);
+        }
+
+        file.sync_all().await.map_err(AppError::Io)?;
+        written
+    };
 
     let new_offset = received_bytes + chunk_len;
 
@@ -316,6 +358,8 @@ async fn append_chunk(
     }
 
     if is_complete {
+        UPLOAD_LOCKS.remove(&upload_id);
+
         let dest_dir = if destination.is_empty() {
             (*state.canonical_root).clone()
         } else {
@@ -393,6 +437,8 @@ async fn cancel_upload(
         return Err(AppError::UploadNotFound(upload_id));
     }
 
+    UPLOAD_LOCKS.remove(&upload_id);
+
     let tmp = temp_path(&state.config.cache_dir, &upload_id);
     let _ = tokio::fs::remove_file(&tmp).await;
 
@@ -463,4 +509,51 @@ async fn cleanup_expired(db: &deadpool_sqlite::Pool, cache_dir: &str) -> Result<
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_base64_pairs() {
+        // "filename" -> "hello.txt", "destination" -> "docs/sub"
+        let header = "filename aGVsbG8udHh0, destination ZG9jcy9zdWI=";
+        let parsed = parse_upload_metadata(header);
+        assert_eq!(
+            parsed,
+            vec![
+                ("filename".to_string(), "hello.txt".to_string()),
+                ("destination".to_string(), "docs/sub".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn key_without_value_yields_empty_string() {
+        let parsed = parse_upload_metadata("is_partial");
+        assert_eq!(parsed, vec![("is_partial".to_string(), String::new())]);
+    }
+
+    #[test]
+    fn malformed_base64_yields_empty_value() {
+        let parsed = parse_upload_metadata("filename !!!not-base64!!!");
+        assert_eq!(parsed, vec![("filename".to_string(), String::new())]);
+    }
+
+    #[test]
+    fn non_utf8_payload_yields_empty_value() {
+        // 0xFF 0xFE is not valid UTF-8.
+        let header = format!("filename {}", STANDARD.encode([0xFF, 0xFE]));
+        let parsed = parse_upload_metadata(&header);
+        assert_eq!(parsed, vec![("filename".to_string(), String::new())]);
+    }
+
+    #[test]
+    fn empty_header_yields_single_empty_key() {
+        // Whole-header split keeps one empty segment; callers look keys up by
+        // name, so an empty key is harmless.
+        let parsed = parse_upload_metadata("");
+        assert_eq!(parsed, vec![(String::new(), String::new())]);
+    }
 }

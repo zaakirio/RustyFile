@@ -61,6 +61,7 @@ export const api = {
   search: (params: SearchParams, signal?: AbortSignal) => {
     const qs = new URLSearchParams()
     qs.set('q', params.q)
+    if (params.scope) qs.set('scope', params.scope)
     if (params.type) qs.set('type', params.type)
     if (params.min_size !== undefined) qs.set('min_size', String(params.min_size))
     if (params.max_size !== undefined) qs.set('max_size', String(params.max_size))

@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api/client'
-import type { FileEntry, SearchParams } from '../lib/types'
+import type { SearchHit, SearchParams } from '../lib/types'
 
 interface UseSearchResult {
-  results: FileEntry[]
+  results: SearchHit[]
   total: number
   loading: boolean
   error: string | null
@@ -13,7 +13,7 @@ interface UseSearchResult {
 }
 
 export function useSearch(): UseSearchResult {
-  const [results, setResults] = useState<FileEntry[]>([])
+  const [results, setResults] = useState<SearchHit[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

@@ -1,44 +1,22 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { NavArrowLeft, NavArrowRight } from 'iconoir-react'
 import { api } from '../api/client'
 import { encodeFsPath, extractFsPath } from '../lib/paths'
+import { languageLabel } from '../lib/editorLanguage'
 import Breadcrumbs from '../components/Breadcrumbs'
+import CodeEditor from '../components/CodeEditor'
 import type { FileInfo } from '../lib/types'
-
-function detectLanguage(ext: string | undefined): string {
-  const map: Record<string, string> = {
-    rs: 'RUST', ts: 'TYPESCRIPT', tsx: 'TSX', js: 'JAVASCRIPT', jsx: 'JSX',
-    py: 'PYTHON', yaml: 'YAML', yml: 'YAML', toml: 'TOML', json: 'JSON',
-    html: 'HTML', css: 'CSS', md: 'MARKDOWN', txt: 'TEXT', sh: 'SHELL',
-    sql: 'SQL', xml: 'XML', go: 'GO', rb: 'RUBY',
-  }
-  return map[ext ?? ''] ?? 'TEXT'
-}
-
-function getExtension(filename: string): string | undefined {
-  const parts = filename.split('.')
-  return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : undefined
-}
-
-function computeLineCol(text: string, pos: number): { line: number; col: number } {
-  const before = text.slice(0, pos)
-  const lines = before.split('\n')
-  return { line: lines.length, col: lines[lines.length - 1].length + 1 }
-}
 
 export default function EditorPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const gutterRef = useRef<HTMLDivElement>(null)
 
   // Extract file path from URL: /edit/path/to/file.txt -> "path/to/file.txt"
   const filePath = extractFsPath(location.pathname, '/edit/')
 
   const filename = filePath.split('/').pop() ?? ''
-  const ext = getExtension(filename)
-  const language = detectLanguage(ext)
+  const language = languageLabel(filename)
 
   const [originalContent, setOriginalContent] = useState('')
   const [content, setContent] = useState('')
@@ -119,29 +97,6 @@ export default function EditorPage() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [handleSave])
-
-  // Track cursor position
-  const updateCursor = useCallback(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    const pos = ta.selectionStart
-    setCursorPos(computeLineCol(ta.value, pos))
-  }, [])
-
-  // Sync gutter scroll with textarea scroll
-  const handleScroll = useCallback(() => {
-    const ta = textareaRef.current
-    const gutter = gutterRef.current
-    if (ta && gutter) {
-      gutter.scrollTop = ta.scrollTop
-    }
-  }, [])
-
-  // Line numbers
-  const lineNumbers = useMemo(() => {
-    const count = content.split('\n').length
-    return Array.from({ length: count }, (_, i) => i + 1)
-  }, [content])
 
   if (loading) {
     return (
@@ -224,38 +179,12 @@ export default function EditorPage() {
       </header>
 
       {/* Editor area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Line number gutter */}
-        <div
-          ref={gutterRef}
-          className="w-12 bg-surface border-r border-borders overflow-y-auto shrink-0 select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          aria-hidden="true"
-        >
-          <div className="pt-4 pr-2">
-            {lineNumbers.map((num) => (
-              <div
-                key={num}
-                className="font-mono text-[13px] leading-[21px] text-muted text-right pr-1"
-              >
-                {num}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Textarea */}
-        <textarea
-          ref={textareaRef}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <CodeEditor
+          filename={filename}
           value={content}
-          onChange={(e) => {
-            setContent(e.target.value)
-            updateCursor()
-          }}
-          onKeyUp={updateCursor}
-          onClick={updateCursor}
-          onScroll={handleScroll}
-          spellCheck={false}
-          className="flex-1 bg-background font-mono text-[13px] leading-[21px] p-4 text-text-main resize-none outline-none overflow-auto"
+          onChange={setContent}
+          onCursorChange={setCursorPos}
         />
       </div>
 

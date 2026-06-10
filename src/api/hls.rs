@@ -12,6 +12,9 @@ use crate::services::file_ops;
 use crate::services::transcoder::VideoTranscoder;
 use crate::state::AppState;
 
+/// Segments are immutable for a given source, so clients may cache for a day.
+const SEGMENT_CACHE_CONTROL: &str = "public, max-age=86400, immutable";
+
 async fn playlist(
     State(state): State<AppState>,
     Path(user_path): Path<String>,
@@ -40,12 +43,11 @@ async fn playlist(
 
     let m3u8 = state.transcoder.playlist(&resolved, &source_key).await?;
 
-    Response::builder()
+    Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
         .header(header::CACHE_CONTROL, "no-cache")
-        .body(Body::from(m3u8))
-        .map_err(|e| AppError::Internal(e.to_string()))
+        .body(Body::from(m3u8))?)
 }
 
 async fn segment(
@@ -77,13 +79,12 @@ async fn segment(
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
 
-    Response::builder()
+    Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "video/mp2t")
         .header(header::CONTENT_LENGTH, meta.len())
-        .header(header::CACHE_CONTROL, "public, max-age=86400, immutable")
-        .body(body)
-        .map_err(|e| AppError::Internal(e.to_string()))
+        .header(header::CACHE_CONTROL, SEGMENT_CACHE_CONTROL)
+        .body(body)?)
 }
 
 pub fn routes(state: AppState) -> Router<AppState> {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api/client'
 import { encodeFsPath } from '../lib/paths'
+import { useFileEvents } from './useFileEvents'
 import type { DirListing } from '../lib/types'
 
 export function useFiles(path: string) {
@@ -9,10 +10,12 @@ export function useFiles(path: string) {
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
 
-  const fetchListing = useCallback(async (signal?: AbortSignal) => {
+  const fetchListing = useCallback(async (signal?: AbortSignal, silent = false) => {
     if (!mountedRef.current) return
-    setLoading(true)
-    setError(null)
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+    }
     try {
       const res = await api.get<DirListing>(`/api/fs/${encodeFsPath(path)}`, signal)
       if (mountedRef.current) setListing(res)
@@ -36,6 +39,13 @@ export function useFiles(path: string) {
       mountedRef.current = false
     }
   }, [fetchListing])
+
+  // Live updates: silently re-fetch when the server reports a change in the
+  // currently-viewed directory (SSE), without flashing the loading state.
+  const silentRefresh = useCallback(() => {
+    void fetchListing(undefined, true)
+  }, [fetchListing])
+  useFileEvents(path, silentRefresh)
 
   const deleteItem = useCallback(
     async (itemPath: string) => {

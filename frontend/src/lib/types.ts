@@ -51,8 +51,11 @@ export interface ApiError {
   code?: string
 }
 
+export type SearchScope = 'names' | 'content' | 'both'
+
 export interface SearchParams {
   q: string
+  scope?: SearchScope
   type?: 'file' | 'dir' | 'image' | 'video' | 'audio' | 'document'
   min_size?: number
   max_size?: number
@@ -63,8 +66,51 @@ export interface SearchParams {
   offset?: number
 }
 
+/**
+ * A search result entry. Content matches carry a `snippet` with matched
+ * terms wrapped in U+E000 / U+E001 markers (rendered as <mark> by the UI).
+ */
+export interface SearchHit extends FileEntry {
+  snippet?: string
+}
+
 export interface SearchResponse {
-  results: FileEntry[]
+  results: SearchHit[]
   total: number
   query: string
+}
+
+export type ShareKind = 'download' | 'drop'
+
+export interface Share {
+  token: string
+  path: string
+  kind: ShareKind
+  has_password: boolean
+  /** Unix seconds, or null for never. */
+  expires_at: number | null
+  /** Unix seconds. */
+  created_at: number
+  download_count: number
+  /** Whether the shared path still exists on disk. */
+  exists: boolean
+}
+
+export interface CreateShareRequest {
+  path: string
+  kind: ShareKind
+  password?: string
+  expires_in_hours?: number
+}
+
+/**
+ * Public share metadata. For password-protected shares without a valid
+ * password, the server only returns `name` and `has_password`.
+ */
+export interface PublicShareMeta {
+  name: string
+  has_password: boolean
+  kind?: ShareKind
+  is_dir?: boolean
+  size?: number
 }

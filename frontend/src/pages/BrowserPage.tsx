@@ -1,12 +1,13 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { Upload, FolderPlus, Refresh, Xmark, Check, NavArrowLeft, NavArrowRight, Trash, Search as SearchIcon } from 'iconoir-react'
+import { Upload, FolderPlus, Refresh, Xmark, Check, NavArrowLeft, NavArrowRight, Trash, Download, Search as SearchIcon } from 'iconoir-react'
 import { api } from '../api/client'
+import { downloadSelectionAsZip } from '../lib/archive'
 import { useFiles } from '../hooks/useFiles'
 import { useTusUpload } from '../hooks/useTusUpload'
 import { useDragDrop } from '../hooks/useDragDrop'
 import { extractFsPath, encodeFsPath, isTextFile } from '../lib/paths'
-import type { FileEntry, SearchParams } from '../lib/types'
+import type { FileEntry, SearchParams, SearchScope } from '../lib/types'
 import { useSearch } from '../hooks/useSearch'
 import FileRow from '../components/FileRow'
 import Breadcrumbs from '../components/Breadcrumbs'
@@ -14,6 +15,14 @@ import FileList from '../components/FileList'
 import DropZone from '../components/DropZone'
 import UploadFAB from '../components/UploadFAB'
 import UploadManager from '../components/UploadManager'
+import ShareDialog from '../components/ShareDialog'
+import SearchSnippet from '../components/SearchSnippet'
+
+const SEARCH_SCOPES: { value: SearchScope; label: string }[] = [
+  { value: 'names', label: 'NAMES' },
+  { value: 'content', label: 'CONTENTS' },
+  { value: 'both', label: 'BOTH' },
+]
 
 export default function BrowserPage() {
   const location = useLocation()
@@ -30,8 +39,17 @@ export default function BrowserPage() {
   // Action error state (surfaced in UI instead of console.error)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  // Success notice state (e.g. extraction finished)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
+
+  // Path of the archive currently being extracted (disables its button)
+  const [extracting, setExtracting] = useState<string | null>(null)
+
   // Inline delete confirmation state
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
+  // Entry currently being shared (opens the share dialog)
+  const [shareEntry, setShareEntry] = useState<FileEntry | null>(null)
 
   // Inline new folder state
   const [showNewFolder, setShowNewFolder] = useState(false)
@@ -46,6 +64,7 @@ export default function BrowserPage() {
   const [searchMode, setSearchMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchType, setSearchType] = useState<SearchParams['type']>(undefined)
+  const [searchScope, setSearchScope] = useState<SearchScope>('names')
 
   const toggleSelect = useCallback((path: string) => {
     setSelected((prev) => {
@@ -91,6 +110,27 @@ export default function BrowserPage() {
     }
   }, [selected, refresh])
 
+  const downloadZip = useCallback(() => {
+    if (selected.size === 0) return
+    downloadSelectionAsZip(Array.from(selected))
+  }, [selected])
+
+  const handleExtract = useCallback(async (path: string) => {
+    if (extracting) return
+    setActionError(null)
+    setActionNotice(null)
+    setExtracting(path)
+    try {
+      const res = await api.post<{ message: string }>('/api/archive/extract', { path })
+      setActionNotice(res.message)
+      await refresh()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Extraction failed')
+    } finally {
+      setExtracting(null)
+    }
+  }, [refresh, extracting])
+
   const handleNavigate = useCallback((entry: FileEntry) => {
     const encoded = encodeFsPath(entry.path)
     if (entry.is_dir) {
@@ -111,6 +151,10 @@ export default function BrowserPage() {
 
   const handleDelete = useCallback((path: string) => {
     setPendingDelete(path)
+  }, [])
+
+  const handleShare = useCallback((entry: FileEntry) => {
+    setShareEntry(entry)
   }, [])
 
   const confirmDelete = useCallback(async () => {
@@ -149,19 +193,27 @@ export default function BrowserPage() {
 
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value)
-    search({ q: value, type: searchType, path: currentPath || undefined })
-  }, [search, searchType, currentPath])
+    search({ q: value, scope: searchScope, type: searchType, path: currentPath || undefined })
+  }, [search, searchScope, searchType, currentPath])
 
   const handleTypeChange = useCallback((type: SearchParams['type']) => {
     setSearchType(type)
     if (searchQuery.length >= 2) {
-      search({ q: searchQuery, type, path: currentPath || undefined })
+      search({ q: searchQuery, scope: searchScope, type, path: currentPath || undefined })
     }
-  }, [search, searchQuery, currentPath])
+  }, [search, searchQuery, searchScope, currentPath])
+
+  const handleScopeChange = useCallback((scope: SearchScope) => {
+    setSearchScope(scope)
+    if (searchQuery.length >= 2) {
+      search({ q: searchQuery, scope, type: searchType, path: currentPath || undefined })
+    }
+  }, [search, searchQuery, searchType, currentPath])
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery('')
     setSearchType(undefined)
+    setSearchScope('names')
     clearSearch()
     setSearchMode(false)
   }, [clearSearch])
@@ -185,6 +237,11 @@ export default function BrowserPage() {
       {/* Upload manager */}
       <UploadManager items={uploadItems} onPause={pauseUpload} onResume={resumeUpload} onClear={clearCompleted} />
 
+      {/* Share dialog */}
+      {shareEntry && (
+        <ShareDialog entry={shareEntry} onClose={() => setShareEntry(null)} />
+      )}
+
       {/* Action error banner */}
       {actionError && (
         <div className="bg-surface border-b border-borders px-4 py-2.5 flex items-center gap-3">
@@ -198,6 +255,24 @@ export default function BrowserPage() {
           >
             <Xmark width={16} height={16} strokeWidth={2} />
           </button>
+        </div>
+      )}
+
+      {/* Action notice banner (success / progress) */}
+      {(actionNotice || extracting) && (
+        <div className="bg-surface border-b border-borders px-4 py-2.5 flex items-center gap-3">
+          <span className="font-mono text-[12px] text-text-main uppercase tracking-widest font-bold flex-1">
+            [ {extracting ? `EXTRACTING ${extracting.split('/').pop()}...` : actionNotice} ]
+          </span>
+          {!extracting && (
+            <button
+              onClick={() => setActionNotice(null)}
+              className="p-1 text-muted hover:text-primary transition-colors shrink-0"
+              title="Dismiss"
+            >
+              <Xmark width={16} height={16} strokeWidth={2} />
+            </button>
+          )}
         </div>
       )}
 
@@ -242,6 +317,13 @@ export default function BrowserPage() {
           </button>
           <div className="ml-auto flex items-center gap-2">
             <button
+              onClick={downloadZip}
+              className="flex items-center gap-1.5 font-mono text-[12px] font-bold uppercase tracking-widest px-3 py-1 border border-borders text-text-main hover:border-text-main transition-colors"
+            >
+              <Download width={13} height={13} strokeWidth={2} />
+              DOWNLOAD ZIP
+            </button>
+            <button
               onClick={bulkDelete}
               disabled={bulkDeleting}
               className="flex items-center gap-1.5 font-mono text-[12px] font-bold uppercase tracking-widest px-3 py-1 bg-primary text-background hover:opacity-80 transition-opacity disabled:opacity-50"
@@ -274,6 +356,22 @@ export default function BrowserPage() {
               placeholder="Search files..."
               autoFocus
             />
+            <div className="hidden sm:flex items-center shrink-0 border border-borders">
+              {SEARCH_SCOPES.map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => handleScopeChange(value)}
+                  className={`h-8 px-2.5 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                    searchScope === value
+                      ? 'bg-primary text-background'
+                      : 'text-muted hover:text-primary'
+                  }`}
+                  title={`Search ${label.toLowerCase()}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <select
               value={searchType || ''}
               onChange={(e) => handleTypeChange((e.target.value || undefined) as SearchParams['type'])}
@@ -403,16 +501,19 @@ export default function BrowserPage() {
                 <span />
               </div>
               {searchResults.map((entry) => (
-                <FileRow
-                  key={entry.path}
-                  entry={entry}
-                  onItemClick={handleNavigate}
-                  onDelete={handleDelete}
-                  isSelected={false}
-                  selectMode={false}
-                  onToggleSelect={() => {}}
-                  showFullPath
-                />
+                <div key={entry.path}>
+                  <FileRow
+                    entry={entry}
+                    onItemClick={handleNavigate}
+                    onDelete={handleDelete}
+                    isSelected={false}
+                    selectMode={false}
+                    onToggleSelect={() => {}}
+                    showFullPath
+                    onShare={handleShare}
+                  />
+                  {entry.snippet && <SearchSnippet snippet={entry.snippet} />}
+                </div>
               ))}
               <div className="hidden md:flex items-center h-9 px-4 border-t border-borders">
                 <span className="font-mono text-[11px] text-muted uppercase tracking-widest">
@@ -431,6 +532,8 @@ export default function BrowserPage() {
           onDelete={handleDelete}
           selected={selected}
           onToggleSelect={toggleSelect}
+          onExtract={handleExtract}
+          onShare={handleShare}
         />
       )}
 

@@ -56,6 +56,61 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
+impl From<deadpool_sqlite::PoolError> for AppError {
+    fn from(err: deadpool_sqlite::PoolError) -> Self {
+        Self::Pool(err.to_string())
+    }
+}
+
+impl From<deadpool_sqlite::InteractError> for AppError {
+    fn from(err: deadpool_sqlite::InteractError) -> Self {
+        Self::Pool(format!("interact error: {err}"))
+    }
+}
+
+impl From<axum::http::Error> for AppError {
+    fn from(err: axum::http::Error) -> Self {
+        Self::Internal(format!("response build error: {err}"))
+    }
+}
+
+/// Unwraps errors shared behind an `Arc` (e.g. moka's `try_get_with`).
+/// Cloneable variants are reconstructed; non-cloneable payloads degrade to
+/// `Internal`, which they would map to (500) anyway.
+impl From<std::sync::Arc<Self>> for AppError {
+    fn from(err: std::sync::Arc<Self>) -> Self {
+        match std::sync::Arc::try_unwrap(err) {
+            Ok(err) => err,
+            Err(shared) => match &*shared {
+                Self::NotFound(msg) => Self::NotFound(msg.clone()),
+                Self::Unauthorized(msg) => Self::Unauthorized(msg.clone()),
+                Self::Forbidden(msg) => Self::Forbidden(msg.clone()),
+                Self::BadRequest(msg) => Self::BadRequest(msg.clone()),
+                Self::Conflict(msg) => Self::Conflict(msg.clone()),
+                Self::UploadNotFound(msg) => Self::UploadNotFound(msg.clone()),
+                Self::UploadConflict => Self::UploadConflict,
+                Self::SetupRequired => Self::SetupRequired,
+                Self::SetupExpired => Self::SetupExpired,
+                Self::TooManyRequests(msg) => Self::TooManyRequests(msg.clone()),
+                other => Self::Internal(other.to_string()),
+            },
+        }
+    }
+}
+
+impl From<zip::result::ZipError> for AppError {
+    fn from(err: zip::result::ZipError) -> Self {
+        use zip::result::ZipError;
+        match err {
+            ZipError::Io(e) => Self::Io(e),
+            ZipError::FileNotFound => Self::NotFound("Archive entry not found".into()),
+            // ZipError is non_exhaustive; every non-IO variant signals a
+            // malformed or unsupported archive supplied by the client.
+            other => Self::BadRequest(format!("Invalid or unsupported archive: {other}")),
+        }
+    }
+}
+
 impl From<crate::services::transcoder::TranscodeError> for AppError {
     fn from(err: crate::services::transcoder::TranscodeError) -> Self {
         use crate::services::transcoder::TranscodeError;
@@ -92,7 +147,10 @@ impl IntoResponse for AppError {
             Self::UploadNotFound(msg) => (StatusCode::NOT_FOUND, msg),
             Self::UploadConflict => (StatusCode::CONFLICT, "Upload offset mismatch".into()),
             Self::SetupRequired => (StatusCode::PRECONDITION_REQUIRED, "Setup required".into()),
-            Self::SetupExpired => (StatusCode::GONE, "Setup window expired".into()),
+            Self::SetupExpired => (
+                StatusCode::GONE,
+                "Setup window expired. Restart the server to reopen the setup window.".into(),
+            ),
             Self::TooManyRequests(msg) => {
                 tracing::warn!("Rate limited: {msg}");
                 (StatusCode::TOO_MANY_REQUESTS, msg)

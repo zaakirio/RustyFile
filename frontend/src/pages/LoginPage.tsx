@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate, Navigate } from 'react-router'
 import { LogIn } from 'iconoir-react'
-import { useAuth } from '../hooks/useAuth'
+import { useAuth } from '../hooks/auth-context'
 import { ApiClientError } from '../api/client'
 
 export default function LoginPage() {
